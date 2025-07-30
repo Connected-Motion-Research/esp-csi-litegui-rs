@@ -25,7 +25,7 @@ use esp_hal::{
         master::{Config as SpiConfig, Spi},
         Mode,
     },
-    system::{Cpu, CpuControl, Stack},
+    system::{CpuControl, Stack},
     time::Rate,
 };
 use esp_hal_embassy::Executor;
@@ -41,11 +41,9 @@ use sh8601_rs::{
 use static_cell::StaticCell;
 
 use embedded_graphics::{
-    mono_font::{ascii::FONT_10X20, MonoTextStyle},
     pixelcolor::Rgb888,
     prelude::*,
-    primitives::{Circle, Line, PrimitiveStyle, PrimitiveStyleBuilder, Rectangle, Triangle},
-    text::{Alignment, LineHeight, Text, TextStyleBuilder},
+    primitives::{PrimitiveStyleBuilder, Rectangle},
 };
 
 esp_app_desc!();
