@@ -7,8 +7,12 @@ use embassy_sync::{
     blocking_mutex::raw::CriticalSectionRawMutex,
     channel::Channel,
     pubsub::{Subscriber, WaitResult},
+    watch::Watch,
 };
 use embassy_time::{Duration, Timer};
+use embedded_hal_bus::i2c;
+use embedded_hal_bus::i2c::AtomicDevice;
+use embedded_hal_bus::util::AtomicCell;
 use esp_bootloader_esp_idf::esp_app_desc;
 use esp_csi_rs::{
     config::{CSIConfig, TrafficConfig, TrafficType, WiFiConfig},
@@ -20,13 +24,14 @@ use esp_hal::rng::Rng;
 use esp_hal::timer::timg::TimerGroup;
 use esp_hal::{
     delay::Delay,
-    i2c::master::{Config as I2cConfig, I2c},
+    i2c::master::{Config as I2cConfig, Error, I2c},
     spi::{
         master::{Config as SpiConfig, Spi},
         Mode,
     },
     system::{CpuControl, Stack},
     time::Rate,
+    Blocking,
 };
 use esp_hal_embassy::Executor;
 use esp_println as _;
@@ -35,8 +40,8 @@ use esp_wifi::{init, EspWifiController};
 use heapless::Vec;
 use micromath::F32Ext;
 use sh8601_rs::{
-    framebuffer_size, ColorMode, DisplaySize, ResetDriver, Sh8601Driver, Ws18AmoledDriver,
-    DMA_CHUNK_SIZE,
+    framebuffer_size, ColorMode, DisplaySize, ResetInterface as Sh8601ResetInterface, Sh8601Driver,
+    Ws18AmoledDriver, DMA_CHUNK_SIZE,
 };
 use static_cell::StaticCell;
 
@@ -45,6 +50,8 @@ use embedded_graphics::{
     prelude::*,
     primitives::{PrimitiveStyleBuilder, Rectangle},
 };
+
+use ft3x68_rs::{Ft3x68Driver, Gesture, ResetInterface, FT3168_DEVICE_ADDRESS};
 
 esp_app_desc!();
 
@@ -60,13 +67,16 @@ macro_rules! mk_static {
 }
 
 // Enum to select the display mode
+#[derive(Clone, Copy, Debug, PartialEq)]
 enum DisplayMode {
     Magnitude,
     Phase,
 }
 
-// Central place to choose the display mode
-const DISPLAY_MODE: DisplayMode = DisplayMode::Phase;
+// Keep in mind that Watch immediately overwrites the previous value when a new one is sent, without waiting for all receivers to read the previous value.
+// If this poses a problem, changing to a PubSubChannel would be safer.
+// The Watch sender is supposed to update only when a gesture is detected.
+static DISPLAY_MODE: Watch<CriticalSectionRawMutex, DisplayMode, 2> = Watch::new();
 
 static mut APP_CORE_STACK: Stack<8192> = Stack::new();
 
@@ -74,8 +84,11 @@ static CSI_PHASE: Channel<CriticalSectionRawMutex, [f32; VALID_SUBCARRIER_COUNT]
     Channel::new();
 static CSI_MAG: Channel<CriticalSectionRawMutex, [f32; VALID_SUBCARRIER_COUNT], 1> = Channel::new();
 
-// Adjust non-data subcarriers: Remove pilots (7:+7,21:+21,43:-21,57:-7) to include them for smoother visualization.
-// Keep guards/DC/problematic extras (±25/±26, +27-31, -32--27).
+// In CSI acquired array from ESP subcarriers are ordered as follows: [0 to 31,-32 to -1]
+// Pilot Subcarriers -> (7:+7,21:+21,43:-21,57:-7)
+// Null Subcarriers -> (0, ±25/±26, +27-31, -32--27)
+// Refer to https://github.com/StevenMHernandez/ESP32-CSI-Tool/issues/12
+
 const NON_DATA_SUBCARRIERS: &[usize] = &[
     0, // DC (+0)
     25, 26, 27, 28, 29, 30, 31, // +25 to +31
@@ -94,6 +107,50 @@ const DISPLAY_SIZE: DisplaySize = DisplaySize::new(368, 448);
 
 // Calculate framebuffer size based on the display size and color mode
 const FB_SIZE: usize = framebuffer_size(DISPLAY_SIZE, ColorMode::Rgb888);
+
+struct DummyReset;
+impl ResetInterface for DummyReset {
+    type Error = Error;
+    fn reset(&mut self) -> Result<(), Self::Error> {
+        Ok(()) // No-op
+    }
+}
+
+struct Sh8601ResetDriver;
+// Empty Implementation for display since its handled by the touch driver
+impl Sh8601ResetInterface for Sh8601ResetDriver {
+    type Error = Error;
+    fn reset(&mut self) -> Result<(), Self::Error> {
+        Ok(())
+    }
+}
+
+pub struct TouchResetDriver<I2C> {
+    i2c: I2C,
+}
+
+impl<I2C> TouchResetDriver<I2C> {
+    pub fn new(i2c: I2C) -> Self {
+        TouchResetDriver { i2c }
+    }
+}
+
+impl<I2C> ResetInterface for TouchResetDriver<I2C>
+where
+    I2C: embedded_hal::i2c::I2c,
+{
+    type Error = Error;
+
+    fn reset(&mut self) -> Result<(), Self::Error> {
+        let delay = Delay::new();
+        self.i2c.write(0x20, &[0x03, 0x00]).unwrap(); // Configure as output
+        self.i2c.write(0x20, &[0x01, 0b0000_0010]).unwrap(); // Drive low
+        delay.delay_millis(20);
+        self.i2c.write(0x20, &[0x01, 0b0000_0111]).unwrap(); // Drive high
+        delay.delay_millis(150);
+        Ok(())
+    }
+}
 
 #[esp_hal_embassy::main]
 async fn main(spawner: Spawner) {
@@ -145,19 +202,31 @@ async fn main(spawner: Spawner) {
     // https://files.waveshare.com/wiki/ESP32-S3-Touch-AMOLED-1.8/ESP32-S3-Touch-AMOLED-1.8.pdf
     let i2c = I2c::new(
         peripherals.I2C0,
-        I2cConfig::default().with_frequency(Rate::from_khz(400)),
+        I2cConfig::default().with_frequency(Rate::from_khz(300)),
     )
     .unwrap()
     .with_sda(peripherals.GPIO15)
     .with_scl(peripherals.GPIO14);
 
+    let i2c_cell = mk_static!(AtomicCell<I2c<'static, Blocking>>, AtomicCell::new(i2c));
+
     // Initialize I2C GPIO Reset Pin for the WaveShare 1.8" AMOLED display
-    let reset = ResetDriver::new(i2c);
+    let reset = Sh8601ResetDriver {};
+    let mut touch_reset = TouchResetDriver::new(i2c::AtomicDevice::new(i2c_cell));
+    touch_reset.reset().unwrap();
 
     // Initialize display driver for the Waveshare 1.8" AMOLED display
     let ws_driver = Ws18AmoledDriver::new(lcd_spi);
 
-    // Instantiare and Initialize Display
+    // Instantiate and Initialize Touch Driver
+    let mut touch = Ft3x68Driver::new(
+        i2c::AtomicDevice::new(i2c_cell),
+        FT3168_DEVICE_ADDRESS,
+        DummyReset {},
+        delay,
+    );
+
+    // Instantiate and Initialize Display
     println!("Initializing SH8601 Display...");
     let display_res = Sh8601Driver::new_heap::<_, FB_SIZE>(
         ws_driver,
@@ -240,38 +309,101 @@ async fn main(spawner: Spawner) {
         .start_app_core(unsafe { &mut *addr_of_mut!(APP_CORE_STACK) }, move || {
             static EXECUTOR: StaticCell<Executor> = StaticCell::new();
             let executor = EXECUTOR.init(Executor::new());
-            executor.run(|spawner| match DISPLAY_MODE {
-                DisplayMode::Magnitude => {
-                    spawner.spawn(mag_display_task(display)).ok();
-                }
-                DisplayMode::Phase => {
-                    spawner.spawn(phase_display_task(display)).ok();
-                }
+            executor.run(|spawner| {
+                // spawner.spawn(touch_task(touch)).ok();
+                spawner.spawn(display_task(display)).ok();
             });
         })
         .unwrap();
 
+    touch
+        .initialize()
+        .expect("Failed to initialize touch driver");
+
+    // Activate Gesture Mode to detect gestures
+    touch
+        .set_gesture_mode(true)
+        .expect("Failed to set gesture mode");
+
+    // Set the current display mode and send to Watch variable (default to Magnitude)
+    let mut current_display_mode = DisplayMode::Magnitude;
+    let display_mode_watch = DISPLAY_MODE.sender();
+    display_mode_watch.send(current_display_mode);
+    // Default to None gesture
+    let mut current_gesture = Gesture::None;
+
     loop {
-        Timer::after(Duration::from_secs(1)).await
+        let _ = touch.touch1();
+        let new_gesture = touch.read_gesture().unwrap_or_else(|e| {
+            println!("Error reading gesture: {:?}", e);
+            Gesture::None
+        });
+
+        if new_gesture != current_gesture {
+            match new_gesture {
+                Gesture::SwipeLeft => {
+                    current_display_mode = match current_display_mode {
+                        DisplayMode::Magnitude => DisplayMode::Phase,
+                        DisplayMode::Phase => DisplayMode::Magnitude,
+                    };
+                    display_mode_watch.send(current_display_mode);
+                    current_gesture = new_gesture;
+                }
+                Gesture::SwipeRight => {
+                    current_display_mode = match current_display_mode {
+                        DisplayMode::Magnitude => DisplayMode::Phase,
+                        DisplayMode::Phase => DisplayMode::Magnitude,
+                    };
+                    display_mode_watch.send(current_display_mode);
+                    current_gesture = new_gesture;
+                }
+                _ => {}
+            }
+        }
+        Timer::after(Duration::from_millis(1000)).await;
     }
 }
 
 #[embassy_executor::task]
-async fn phase_display_task(mut display_driver: Sh8601Driver<Ws18AmoledDriver, ResetDriver>) {
+async fn display_task(mut display_driver: Sh8601Driver<Ws18AmoledDriver, Sh8601ResetDriver>) {
     let row_height: u32 = DISPLAY_SIZE.height as u32 / VALID_SUBCARRIER_COUNT as u32;
-    let column_width: u32 = 5;
+    let column_width: u32 = 5; // Match phase_display_task
     let col_count = (DISPLAY_SIZE.width as u32 / column_width) as u32;
     let mut current_col: u32 = 0;
 
-    loop {
-        let phase = CSI_PHASE.receive().await;
+    let mut display_mode = DisplayMode::Magnitude;
+    let mut display_watch = DISPLAY_MODE.receiver().unwrap();
 
+    loop {
+        // Check if new display mode is available
+        // Optionally empty screen on change of display mode
+        if let Some(new_mode) = display_watch.try_changed() {
+            if new_mode != display_mode {
+                display_mode = new_mode;
+                println!("Display task switched to {:?}", display_mode); // Debug
+                display_driver.clear(Rgb888::new(0, 0, 0)).unwrap();
+                display_driver
+                    .partial_flush(
+                        0,
+                        (DISPLAY_SIZE.width - 1) as u16,
+                        0,
+                        (DISPLAY_SIZE.height - 1) as u16,
+                        ColorMode::Rgb888,
+                    )
+                    .unwrap();
+            }
+        }
+
+        let csi_data = match display_mode {
+            DisplayMode::Magnitude => CSI_MAG.receive().await,
+            DisplayMode::Phase => CSI_PHASE.receive().await,
+        };
         for row in 0..VALID_SUBCARRIER_COUNT {
-            let normalized_phase = phase[row];
+            let normalized_data = csi_data[row];
             let color = Rgb888::new(
-                (normalized_phase * 255.0) as u8,
-                ((1.0 - (2.0 * (normalized_phase - 0.5).abs())) * 255.0) as u8,
-                ((1.0 - normalized_phase) * 255.0) as u8,
+                (normalized_data * 255.0) as u8,
+                ((1.0 - (2.0 * (normalized_data - 0.5).abs())) * 255.0) as u8,
+                ((1.0 - normalized_data) * 255.0) as u8,
             );
             let x = current_col * column_width;
             let y = row as u32 * row_height;
@@ -351,7 +483,15 @@ fn reorder_subcarriers(data: &[f32; VALID_SUBCARRIER_COUNT]) -> [f32; VALID_SUBC
 async fn csi_task(
     mut csi_buffer: Subscriber<'static, CriticalSectionRawMutex, Vec<i8, 616>, 4, 2, 1>,
 ) {
+    let mut display_mode = DisplayMode::Magnitude;
+    let mut display_watch = DISPLAY_MODE.receiver().unwrap();
+
     loop {
+        // Check if new display mode is available
+        if let Some(new_mode) = display_watch.try_changed() {
+            display_mode = new_mode
+        };
+
         match csi_buffer.next_message().await {
             WaitResult::Lagged(_) => {
                 println!("CSI task lagged, skipping message");
@@ -363,7 +503,7 @@ async fn csi_task(
                     continue;
                 }
 
-                match DISPLAY_MODE {
+                match display_mode {
                     DisplayMode::Phase => {
                         let mut phase: [f32; VALID_SUBCARRIER_COUNT] =
                             [0.0; VALID_SUBCARRIER_COUNT];
@@ -499,66 +639,6 @@ async fn csi_task(
                 }
             }
         }
-    }
-}
-
-#[embassy_executor::task]
-async fn mag_display_task(mut display_driver: Sh8601Driver<Ws18AmoledDriver, ResetDriver>) {
-    let row_height: u32 = DISPLAY_SIZE.height as u32 / VALID_SUBCARRIER_COUNT as u32;
-    let column_width: u32 = 5; // Match phase_display_task
-    let col_count = (DISPLAY_SIZE.width as u32 / column_width) as u32;
-    let mut current_col: u32 = 0;
-
-    loop {
-        let amplitude = CSI_MAG.receive().await;
-
-        for row in 0..VALID_SUBCARRIER_COUNT {
-            let normalized_amplitude = amplitude[row];
-            let color = Rgb888::new(
-                (normalized_amplitude * 255.0) as u8,
-                ((1.0 - (2.0 * (normalized_amplitude - 0.5).abs())) * 255.0) as u8,
-                ((1.0 - normalized_amplitude) * 255.0) as u8,
-            );
-            let x = current_col * column_width;
-            let y = row as u32 * row_height;
-            let square_width = if current_col == col_count - 1 {
-                DISPLAY_SIZE.width as u32 - (current_col * column_width)
-            } else {
-                column_width
-            };
-            let square_height = if row == VALID_SUBCARRIER_COUNT - 1 {
-                DISPLAY_SIZE.height as u32 - (row as u32 * row_height)
-            } else {
-                row_height
-            };
-
-            if square_width > 0 && square_height > 0 {
-                Rectangle::new(
-                    Point::new(x as i32, y as i32),
-                    Size::new(square_width, square_height),
-                )
-                .into_styled(PrimitiveStyleBuilder::new().fill_color(color).build())
-                .draw(&mut display_driver)
-                .unwrap();
-            }
-        }
-
-        let x_start = (current_col * column_width) as u16;
-        let x_end = if current_col == col_count - 1 {
-            (DISPLAY_SIZE.width - 1) as u16
-        } else {
-            ((current_col + 1) * column_width - 1) as u16
-        };
-        let y_start = 0u16;
-        let y_end = (DISPLAY_SIZE.height - 1) as u16;
-
-        if let Err(e) =
-            display_driver.partial_flush(x_start, x_end, y_start, y_end, ColorMode::Rgb888)
-        {
-            println!("Error flushing column {}: {:?}", current_col, e);
-        }
-
-        current_col = (current_col + 1) % col_count;
     }
 }
 
