@@ -406,9 +406,19 @@ checksum = "0649998afacf6d575d126d83e68b78c0ab0e00ca2ac7e9b3db11b4cbe8274ef0"
 dependencies = [
  "az",
  "byteorder",
- "embedded-graphics-core",
+ "embedded-graphics-core 0.4.0",
  "float-cmp",
  "micromath",
+]
+
+[[package]]
+name = "embedded-graphics-core"
+version = "0.3.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b8b1239db5f3eeb7e33e35bd10bd014e7b2537b17e071f726a09351431337cfa"
+dependencies = [
+ "az",
+ "byteorder",
 ]
 
 [[package]]
@@ -419,6 +429,15 @@ checksum = "ba9ecd261f991856250d2207f6d8376946cd9f412a2165d3b75bc87a0bc7a044"
 dependencies = [
  "az",
  "byteorder",
+]
+
+[[package]]
+name = "embedded-graphics-transform"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7bd45f20ef58186a640e1777177c37e4ef33dbb6ce3c4d9f909d81b498a643c2"
+dependencies = [
+ "embedded-graphics-core 0.3.3",
 ]
 
 [[package]]
@@ -597,6 +616,7 @@ dependencies = [
  "embassy-sync 0.7.0",
  "embassy-time",
  "embedded-graphics",
+ "embedded-graphics-transform",
  "embedded-hal 1.0.0",
  "embedded-hal-bus",
  "embedded-io",
@@ -612,6 +632,7 @@ dependencies = [
  "ft3x68-rs",
  "heapless",
  "micromath",
+ "profont",
  "sh8601-rs",
  "smoltcp",
  "static_cell",
@@ -1275,6 +1296,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "profont"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "016681370a9dd6e7ddb4c1a959922fd59dc45e5ebaa5ff5b13090267898ced34"
+dependencies = [
+ "embedded-graphics",
+]
+
+[[package]]
 name = "quote"
 version = "1.0.40"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1408,7 +1438,7 @@ dependencies = [
  "critical-section",
  "document-features",
  "embedded-graphics",
- "embedded-graphics-core",
+ "embedded-graphics-core 0.4.0",
  "embedded-hal 1.0.0",
  "esp-alloc",
  "esp-backtrace",

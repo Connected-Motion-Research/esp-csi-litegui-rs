@@ -66,6 +66,8 @@ embedded-graphics = "0.8.0"
 embedded-hal-bus = "0.3.0"
 ft3x68-rs = "0.1.2"
 embedded-hal = "1.0.0"
+profont = "0.7.0"
+embedded-graphics-transform = "0.1.0"
 
 [profile.dev]
 # Rust debug is too slow.
