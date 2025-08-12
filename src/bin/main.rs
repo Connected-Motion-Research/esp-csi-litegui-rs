@@ -7,7 +7,6 @@ use embassy_sync::{
     blocking_mutex::raw::CriticalSectionRawMutex, channel::Channel, pubsub::Subscriber,
     watch::Watch,
 };
-use embassy_time::{Duration, Timer};
 use embedded_hal_bus::i2c;
 use embedded_hal_bus::util::AtomicCell;
 use esp_bootloader_esp_idf::esp_app_desc;
@@ -50,12 +49,11 @@ use embedded_graphics::{
     pixelcolor::Rgb888,
     prelude::*,
     primitives::{PrimitiveStyleBuilder, Rectangle},
-    text::renderer::TextRenderer,
     text::Text,
 };
-use profont::{PROFONT_14_POINT, PROFONT_18_POINT, PROFONT_24_POINT};
+use profont::{PROFONT_14_POINT, PROFONT_24_POINT};
 
-use ft3x68_rs::{Ft3x68Driver, Gesture, ResetInterface, TouchState, FT3168_DEVICE_ADDRESS};
+use ft3x68_rs::{Ft3x68Driver, Gesture, ResetInterface, FT3168_DEVICE_ADDRESS};
 
 esp_app_desc!();
 
@@ -86,8 +84,6 @@ impl DisplayMode {
     }
 
     pub fn previous(&self) -> Self {
-        // For a two-state enum, next() and previous() do the same toggle.
-        // If you added a third mode, this logic would differ.
         match self {
             DisplayMode::Magnitude => DisplayMode::Phase,
             DisplayMode::Phase => DisplayMode::Magnitude,
@@ -95,8 +91,7 @@ impl DisplayMode {
     }
 }
 
-// Keep in mind that Watch immediately overwrites the previous value when a new one is sent, without waiting for all receivers to read the previous value.
-// If this poses a problem, changing to a PubSubChannel would be safer.
+// The Watch construct immediately overwrites the previous value when a new one is sent, without waiting for all receivers to read the previous value.
 // The Watch sender is supposed to update only when a gesture is detected.
 static DISPLAY_MODE: Watch<CriticalSectionRawMutex, DisplayMode, 2> = Watch::new();
 
@@ -107,7 +102,10 @@ static CSI_PHASE: Channel<CriticalSectionRawMutex, [f32; VALID_SUBCARRIER_COUNT]
     Channel::new();
 static CSI_MAG: Channel<CriticalSectionRawMutex, [f32; VALID_SUBCARRIER_COUNT], 1> = Channel::new();
 
-// In CSI acquired array from ESP subcarriers are ordered as follows: [0 to 31,-32 to -1]
+// According to documentation the acquired array from ESP is an LLTF array with subcarriers ordered as follows: [0 to 31,-32 to -1]
+// There are several formats depending on supported training algortihim
+// Core library would have to integrate some indication for the type of CSI recieved if to be accomodated here
+
 // Pilot Subcarriers -> (+7/-7,+21/-21)
 // Null Subcarriers -> (0, +27~31, -27~-32)
 // This is assuming LLTF
@@ -116,16 +114,18 @@ static CSI_MAG: Channel<CriticalSectionRawMutex, [f32; VALID_SUBCARRIER_COUNT], 
 const VALID_SUBCARRIER_COUNT: usize = 52;
 
 // Set up the display size
+// The Waveshare 1.8" AMOLED display has a resolution of 368x448 pixels
 const DISPLAY_SIZE: DisplaySize = DisplaySize::new(368, 448);
 
 // Heatmap placement configuration
-// Define starting point (upper left corner) and width;
+// This allows for the heatmap to be placed on different parts of the display
+// Starting point is the upper left corner of the heatmap:
 const HEATMAP_START_X: u32 = 20;
 const HEATMAP_START_Y: u32 = 80;
 const HEATMAP_WIDTH: u32 = 350;
 const HEATMAP_HEIGHT: u32 = 350;
 
-// Clip to fit within display bounds
+// Make sure to clip to fit within display bounds
 const HEATMAP_MAX_WIDTH: u32 = DISPLAY_SIZE.width as u32 - HEATMAP_START_X;
 const HEATMAP_MAX_HEIGHT: u32 = DISPLAY_SIZE.height as u32 - HEATMAP_START_Y;
 const HEATMAP_EFFECTIVE_WIDTH: u32 = if HEATMAP_WIDTH < HEATMAP_MAX_WIDTH {
@@ -142,17 +142,17 @@ const HEATMAP_EFFECTIVE_HEIGHT: u32 = if HEATMAP_HEIGHT < HEATMAP_MAX_HEIGHT {
 // Calculate framebuffer size based on the display size and color mode
 const FB_SIZE: usize = framebuffer_size(DISPLAY_SIZE, ColorMode::Rgb888);
 
+// The display driver and the touch driver are reset by the same I2C-based I/O expander on the Waveshare display
+// Also both drivers require a ResetInterface trait implmentation, however only one implementation is sufficient.
+// This is a dummy reset implementation that does nothing to statisfy the requirements of the driver.
 struct DummyReset;
 impl ResetInterface for DummyReset {
     type Error = Error;
     fn reset(&mut self) -> Result<(), Self::Error> {
-        Ok(()) // No-op
+        Ok(())
     }
 }
-
-struct Sh8601ResetDriver;
-// Empty Implementation for display since its handled by the touch driver
-impl Sh8601ResetInterface for Sh8601ResetDriver {
+impl Sh8601ResetInterface for DummyReset {
     type Error = Error;
     fn reset(&mut self) -> Result<(), Self::Error> {
         Ok(())
@@ -195,7 +195,7 @@ async fn main(spawner: Spawner) {
 
     esp_alloc::heap_allocator!(size:72 * 1024);
 
-    // ------------------ Display Configuration ------------------ //
+    // Display Configuration //
 
     esp_alloc::psram_allocator!(peripherals.PSRAM, esp_hal::psram);
 
@@ -227,7 +227,7 @@ async fn main(spawner: Spawner) {
     .with_dma(peripherals.DMA_CH0)
     .with_buffers(dma_rx_buf, dma_tx_buf);
 
-    // ------------------ Touch Configuration ------------------ //
+    // Touch Configuration //
 
     // I2C Configuration for Waveshare ESP32-S3 1.8inch AMOLED Touch Display
     // Display uses an I2C IO Expander (TCA9554PWR) to control the LCD_RESET and LCD_DC lines.
@@ -247,12 +247,11 @@ async fn main(spawner: Spawner) {
     let i2c_cell = mk_static!(AtomicCell<I2c<'static, Blocking>>, AtomicCell::new(i2c));
 
     // Initialize I2C GPIO Reset Pin for the WaveShare 1.8" AMOLED display
-    let reset = Sh8601ResetDriver {};
     let mut touch_reset = TouchResetDriver::new(i2c::AtomicDevice::new(i2c_cell));
     touch_reset.reset().unwrap();
 
     // Initialize display driver for the Waveshare 1.8" AMOLED display
-    let ws_driver = Ws18AmoledDriver::new(lcd_spi);
+    let ws_driver: Ws18AmoledDriver = Ws18AmoledDriver::new(lcd_spi);
 
     // Configure Pin to detect touch interrupts
     // Touch interrupt is connected to GPIO21 acording to WaveShare Schematic
@@ -270,7 +269,7 @@ async fn main(spawner: Spawner) {
     println!("Initializing SH8601 Display...");
     let display_res = Sh8601Driver::new_heap::<_, FB_SIZE>(
         ws_driver,
-        reset,
+        DummyReset {},
         ColorMode::Rgb888,
         DISPLAY_SIZE,
         delay,
@@ -286,7 +285,7 @@ async fn main(spawner: Spawner) {
         }
     };
 
-    // ------------------ WiFi & CSI Collection Configuration & Initialization ------------------ //
+    //  WiFi & CSI Collection Configuration & Initialization //
 
     // Instantiate peripherals necessary to set up  WiFi
     let timer1 = esp_hal::timer::timg::TimerGroup::new(peripherals.TIMG0);
@@ -306,9 +305,6 @@ async fn main(spawner: Spawner) {
     println!("WiFi Controller Initialized");
 
     // Create a CSI collector configuration
-    // Device configured to default as Sniffer
-    // Traffic generation, although default, is ignored
-    // Network Architechture is Sniffer
     let csi_collector = CSICollector::new(
         WiFiConfig {
             ssid: "Connected Motion ".try_into().unwrap(),
@@ -332,7 +328,7 @@ async fn main(spawner: Spawner) {
         .init(controller, interfaces, seed, &spawner)
         .unwrap();
 
-    // ---------------- Embassy Intialization ---------------- //
+    // Embassy Intialization //
     let timg1 = TimerGroup::new(peripherals.TIMG1);
     esp_hal_embassy::init(timg1.timer0);
 
@@ -405,11 +401,11 @@ async fn main(spawner: Spawner) {
 }
 
 #[embassy_executor::task]
-async fn display_task(mut display_driver: Sh8601Driver<Ws18AmoledDriver, Sh8601ResetDriver>) {
+async fn display_task(mut display_driver: Sh8601Driver<Ws18AmoledDriver, DummyReset>) {
     // Initial full-screen clear
     display_driver.clear(Rgb888::new(0, 0, 0)).unwrap();
 
-    // Define text styles
+    // Text styles
     let title_text_style = MonoTextStyle::new(&PROFONT_24_POINT, Rgb888::YELLOW);
     let static_text_style = MonoTextStyle::new(&PROFONT_14_POINT, Rgb888::WHITE);
     let clear_style = PrimitiveStyleBuilder::new()
@@ -419,7 +415,7 @@ async fn display_task(mut display_driver: Sh8601Driver<Ws18AmoledDriver, Sh8601R
     // Static element drawing in framebuffer
     // Draw static y-axis label vertically, character-by-character
     let yaxis_label = "Subcarriers";
-    let yaxis_label_style = static_text_style.clone(); // Clone once for this section
+    let yaxis_label_style = static_text_style.clone();
     let char_height = yaxis_label_style.font.character_size.height as i32;
     let char_width = yaxis_label_style.font.character_size.width as i32;
     let yaxis_label_height = yaxis_label.chars().count() as i32 * char_height;
@@ -442,7 +438,7 @@ async fn display_task(mut display_driver: Sh8601Driver<Ws18AmoledDriver, Sh8601R
         .unwrap();
     }
 
-    // Draw static x-axis label horizontally
+    // Draw static x-axis label horizontally & center
     let xaxis_label_str = "Packets";
     let xaxis_label = Text::new(xaxis_label_str, Point::zero(), static_text_style.clone());
     let xaxis_label_width = xaxis_label.bounding_box().size.width as i32;
@@ -463,6 +459,7 @@ async fn display_task(mut display_driver: Sh8601Driver<Ws18AmoledDriver, Sh8601R
     let text_strip_height: i32 = 40;
     let text_strip_y: i32 = (HEATMAP_START_Y as i32 - text_strip_height - 5).max(0);
 
+    // Draw title text
     let draw_title = |display: &mut Sh8601Driver<_, _>, mode: DisplayMode| {
         let mode_str = match mode {
             DisplayMode::Magnitude => "Magnitude",
@@ -491,6 +488,7 @@ async fn display_task(mut display_driver: Sh8601Driver<Ws18AmoledDriver, Sh8601R
 
     draw_title(&mut display_driver, current_display_mode);
 
+    // Flush static text changes
     display_driver
         .partial_flush(
             0,
@@ -505,6 +503,7 @@ async fn display_task(mut display_driver: Sh8601Driver<Ws18AmoledDriver, Sh8601R
     let col_count = HEATMAP_EFFECTIVE_WIDTH / column_width;
     let mut current_col: u32 = 0;
 
+    // Enter loop for heatmap updates
     loop {
         if let Some(new_mode) = display_watch.try_changed() {
             if new_mode != current_display_mode {
