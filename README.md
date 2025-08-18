@@ -25,7 +25,7 @@ At a minimum, you would need the following:
 > ‼️ Installing `espflash` requires a Rust installation. If you don't have Rust installed, follow the instructions on the [rustup](https://rustup.rs/) website.
 
 
-## 📋 Procedure
+## 📋 Usage
 There are a few ways in which we can obtain CSI data. One is either through a connection between a Station and an Access point, or alternatively sniffing network packets. For better looking heatmaps, its recommended to establish a connection.
 
 To operate in sniffer mode, you'd need to change the configuration of the `CSICollector` abstraction in `main.rs`. For more detail, you are recommended to refer to the  [`esp-csi-rs`](https://github.com/Connected-Motion-Research/esp-csi-rs) crate documentation.
