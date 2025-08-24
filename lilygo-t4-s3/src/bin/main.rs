@@ -296,8 +296,8 @@ async fn main(spawner: Spawner) {
     // Create a CSI collector configuration
     let csi_collector = CSICollector::new(
         WiFiConfig {
-            ssid: "Connected Motion ".try_into().unwrap(),
-            password: "automotion@123".try_into().unwrap(),
+            ssid: "SSID".try_into().unwrap(),
+            password: "PASSWORD".try_into().unwrap(),
             ..Default::default()
         },
         esp_csi_rs::WiFiMode::Station,
@@ -335,7 +335,6 @@ async fn main(spawner: Spawner) {
             static EXECUTOR: StaticCell<Executor> = StaticCell::new();
             let executor = EXECUTOR.init(Executor::new());
             executor.run(|spawner| {
-                // spawner.spawn(touch_task(touch)).ok();
                 spawner.spawn(display_task(display)).ok();
             });
         })
@@ -379,7 +378,6 @@ async fn main(spawner: Spawner) {
 
             current_gesture = new_gesture;
         }
-        // Timer::after_millis(1).await;
     }
 }
 
@@ -429,7 +427,7 @@ async fn display_task(
     let xaxis_label_width = xaxis_label.bounding_box().size.width as i32;
     let xaxis_label_x =
         HEATMAP_START_X as i32 + (HEATMAP_EFFECTIVE_WIDTH as i32 - xaxis_label_width) / 2;
-    let padding = 10i32; // Set to 0 for no gap; increase if you want space
+    let padding = 10i32; // Text padding from bottom of heatmap
     let xaxis_label_y = (HEATMAP_START_Y + HEATMAP_EFFECTIVE_HEIGHT) as i32
         + padding
         + static_text_style.font.baseline as i32;
@@ -493,7 +491,6 @@ async fn display_task(
     let col_count = HEATMAP_EFFECTIVE_WIDTH / column_width;
     let mut current_col: u32 = 0;
 
-    // Enter loop for heatmap updates
     loop {
         if let Some(new_mode) = display_watch.try_changed() {
             if new_mode != current_display_mode {
@@ -557,8 +554,6 @@ async fn display_task(
                 column_width
             };
 
-            // This is the only height calculation needed. It correctly distributes
-            // the pixels across all rows.
             let square_height = base_row_height + if (row as u32) < extra_rows { 1 } else { 0 };
 
             if square_width > 0 && square_height > 0 {
