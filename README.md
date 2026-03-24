@@ -31,15 +31,27 @@ At a minimum, you would need the following:
 ## 📋 Usage
 There are a few ways in which we can obtain CSI data. One is either through a connection between a Station and an Access point, or alternatively sniffing network packets. For better looking heatmaps, its recommended to establish a connection.
 
-> 📝 **Note:** Currently the code is configured to collect CSI in station mode. This requires connecting to an access point (step 2 below). To operate in sniffer mode, you'd need to change the configuration of the `CSICollector` abstraction in `main.rs`. For more detail, you are recommended to refer to the [`esp-csi-rs`](https://github.com/Connected-Motion-Research/esp-csi-rs) crate documentation.
+CSI mode is selected using Cargo features.
+
+### Board feature (required)
+Select exactly one board feature:
+- `lilygo-t4`
+- `waveshare-esp32-s3-touch-amoled-1_8`
+
+### CSI mode features
+- `mode-sta`
+- `mode-now`
+- `mode-snf`
+
+Mode selection behavior:
+- `mode-now` is the default mode.
+- You can safely override default mode by adding `mode-sta` or `mode-snf`
+  without disabling default features.
+- `mode-sta` and `mode-snf` cannot be enabled together.
 
 ### Steps to Run:
-1. ***Setup Project***: Clone this repository.
-2. ***Navigate to Project Directory***: Navigate to the project directory of the desired display. For example, for the Waveshare ESP32-S3-Touch-AMOLED 1.8 display, run:
-```bash
-cd esp-csi-litegui-rs/waveshare-esp32-s3-touch-amoled-1.8
-```
-3. ***Modify*** **`main.rs`**: Head to the `main.rs` file modify the `"SSID"` and `"PASSWORD"` strings in the following code to match your access point credentials:
+1. ***Setup Project***: Clone this repository and `cd` into the repo root.
+2. ***Configure Wi-Fi credentials*** (required for station mode): update SSID/password in `src/main.rs`.
 
 ```rust
 WiFiConfig {
@@ -49,9 +61,21 @@ WiFiConfig {
 },
 ```
 
-4. ***Build & Run***: execute the following command in the terminal to build then run the project:
+3. ***Build & Run*** with your board + optional CSI mode override:
+
+- LilyGo + default ESP-NOW mode:
 ```bash
-cargo run --release
+cargo run --release --features="lilygo-t4"
+```
+
+- Waveshare + ESP-NOW mode:
+```bash
+cargo run --release --features="waveshare-esp32-s3-touch-amoled-1_8,mode-now"
+```
+
+- Waveshare + Wi-Fi sniffer mode:
+```bash
+cargo run --release --features="waveshare-esp32-s3-touch-amoled-1_8,mode-snf"
 ```
 
 ## License

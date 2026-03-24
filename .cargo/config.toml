@@ -5,9 +5,11 @@ runner = "espflash flash --monitor --chip esp32s3"
 ESP_HAL_CONFIG_PSRAM_MODE = "octal"
 
 [build]
-rustflags = ["-C", "link-arg=-nostartfiles"]
+rustflags = [
+  "-C", "link-arg=-nostartfiles",
+]
 
 target = "xtensa-esp32s3-none-elf"
 
 [unstable]
-build-std = ["alloc", "core"]
+build-std = ["core", "alloc"]

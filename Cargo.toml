@@ -1,0 +1,114 @@
+[package]
+edition      = "2024"
+name         = "esp-csi-litegui-rs"
+rust-version = "1.88"
+version      = "0.1.0"
+description  = "No-std CSI heatmap GUI firmware for ESP32 boards with AMOLED displays"
+license      = "Apache-2.0"
+repository   = "https://github.com/csi-rs/esp-csi-litegui-rs"
+readme       = "README.md"
+keywords     = ["esp32", "wifi", "csi", "embedded", "no-std"]
+categories   = ["embedded", "no-std"]
+
+[features]
+default = ["no-std", "println", "auto", "mode-now"]
+## Build without the standard library.
+no-std = []
+## Enable logging via `println!()`.
+println = ["esp-csi-rs/println", "esp-backtrace/println"]
+## Automatically select the best available backend for the target.
+auto = ["esp-csi-rs/auto"]
+
+## Debugging Features
+## Non-blocking async logging. This is an unstable feature and may cause unexpected behavior. Use with caution.
+async-print = ["esp-csi-rs/async-print"]
+## Enable logging via defmt.
+defmt = [
+    "esp-csi-rs/defmt",
+    "esp-backtrace/defmt",
+]
+## Force the JTAG backend for logging.
+jtag-serial = ["esp-csi-rs/jtag-serial"]
+## Force the UART backend for logging (not recommended, much slower than JTAG backend).
+uart = ["esp-csi-rs/uart"]
+
+## Support for the Lilygo T4
+lilygo-t4 = [
+    "esp-csi-rs/esp32s3"
+]
+
+## Support for Waveshare ESP32-S3-Touch-AMOLED-1.8
+waveshare-esp32-s3-touch-amoled-1_8 = [
+    "esp-csi-rs/esp32s3"
+]
+
+## CSI operation mode feature flags
+## Default mode is `mode-now`.
+## You can safely override it by adding either `mode-sta` or `mode-snf`
+## (without disabling default features).
+mode-sta = []
+mode-now = []
+mode-snf = []
+
+[dependencies]
+esp-bootloader-esp-idf = "0.4.0"
+esp-backtrace = { version = "0.18.1", features = [
+    "panic-handler",
+] }
+esp-hal = { version = "~1.0", default-features = false, features = [
+    "unstable",
+] }
+esp-rtos = { version = "0.2.0", optional = false, features = [
+    "embassy",
+    "esp-alloc",
+    "esp-radio",
+] }
+esp-println = { version = "0.16.1", default-features = false }
+esp-alloc = { version = "0.9.0" }
+embedded-io-async = "0.6.1"
+esp-radio = { version = "0.17.0", default-features = false, optional = false, features = [
+    "wifi",
+    "sniffer",
+    "esp-alloc",
+    "smoltcp",
+    "unstable",
+    "esp-now",
+    "csi",
+] }
+heapless = { version = "0.7", default-features = false }
+embassy-executor = { version = "0.9.1" }
+embassy-time = { version = "0.5.0" }
+static_cell = { version = "2.1.1" }
+embassy-sync = { version = "0.7.0" }
+embassy-futures = { version = "0.1.1" }
+esp-csi-rs = { git = "https://github.com/csi-rs/esp-csi-rs", rev = "74707d4fcd2624b323e69115b61bea47f4532582", default-features = false }
+menu = "0.6.1"
+embedded-io = "0.6.1"
+micromath = "2.1.0"
+rm690b0-rs = { git = "https://github.com/stacks-of-data/rm690b0-rs.git", rev = "91bda339a18df6a1dac3fb6e9b032d5e0a00ba7c", features = ["lilygo_t4_s3"] }
+embedded-graphics = "0.8.2"
+profont = "0.7.0"
+cst226-rs = { git = "https://github.com/stacks-of-data/cst226-rs", rev = "64fc1b958a164d18ccb8bc60e9d252f800f47aa1" }
+embedded-hal = "1.0.0"
+log = { version = "0.4", default-features = false }
+
+[profile.dev]
+# Keep dev reasonably fast to iterate, but avoid extremely slow unoptimized firmware.
+incremental = true
+debug = 1
+opt-level = 2
+overflow-checks = false
+
+[profile.dev.package."*"]
+# Dependencies (HAL, radio, graphics, etc.) are performance critical.
+opt-level = 3
+
+[profile.release]
+codegen-units = 1        # LLVM can perform better optimizations using a single thread
+debug-assertions = false
+incremental = false
+lto = 'fat'
+# Optimize for speed instead of size.
+opt-level = 3
+overflow-checks = false
+panic = "abort"
