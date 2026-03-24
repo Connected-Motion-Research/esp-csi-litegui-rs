@@ -7,6 +7,7 @@ use crate::{
 };
 use embassy_executor::task;
 use embassy_futures::yield_now;
+use embassy_time::{Duration, with_timeout};
 use esp_csi_rs::{CSINode, CSINodeClient};
 use esp_radio::{esp_now::WifiPhyRate, wifi::Protocol};
 use micromath::F32Ext;
@@ -55,8 +56,29 @@ pub async fn csi_task(mut node_handle: CSINodeClient) {
             display_mode = new_mode;
         }
 
-        // Grab the next data whether lagged or not
-        let mut packet = node_handle.get_csi_data().await;
+        // Grab the next data with timeout so we can keep the pipeline alive and
+        // diagnose radio/runtime stalls instead of hard-freezing display updates.
+        let mut packet = match with_timeout(Duration::from_millis(700), node_handle.get_csi_data()).await {
+            Ok(packet) => packet,
+            Err(_) => {
+                // Keep display task active by re-sending latest known frame.
+                let frame = CsiFrame {
+                    magnitude: cached_magnitude,
+                    phase: cached_phase,
+                };
+                if CSI_FRAMES.try_send(frame).is_err() {
+                    let _ = CSI_FRAMES.try_receive();
+                    let _ = CSI_FRAMES.try_send(frame);
+                }
+
+                packets_since_yield = packets_since_yield.wrapping_add(1);
+                if packets_since_yield >= 4 {
+                    packets_since_yield = 0;
+                    yield_now().await;
+                }
+                continue;
+            }
+        };
 
         // Some CSI packets can arrive shorter than the expected 64 complex subcarriers (128 bytes).
         // Handle variable-length packets safely.

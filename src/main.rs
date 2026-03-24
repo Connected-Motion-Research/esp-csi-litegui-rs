@@ -304,7 +304,7 @@ async fn main(spawner: Spawner) {
         }
         Err(e) => {
             log_ln!("Error initializing display: {:?}", e);
-            loop {}
+            panic!("Display initialization failed: {:?}", e);
         }
     };
 

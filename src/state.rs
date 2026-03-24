@@ -1,10 +1,9 @@
 //! Shared runtime state and inter-task channels.
 
 use embassy_sync::{
-    channel::Channel, watch::Watch,
+    blocking_mutex::raw::CriticalSectionRawMutex, channel::Channel, watch::Watch,
 };
 use esp_hal::system::Stack;
-use esp_hal::sync::RawPriorityLimitedMutex;
 use esp_radio::wifi::WifiController;
 use static_cell::StaticCell;
 
@@ -16,7 +15,7 @@ pub static WIFI_CONTROLLER: StaticCell<WifiController<'static>> = StaticCell::ne
 // The Watch construct immediately overwrites the previous value when a new one is sent, without waiting for all receivers to read the previous value.
 // The Watch sender is supposed to update only when a gesture is detected.
 /// Display mode watch channel used by gesture and display tasks.
-pub static DISPLAY_MODE: Watch<RawPriorityLimitedMutex, DisplayMode, 2> = Watch::new();
+pub static DISPLAY_MODE: Watch<CriticalSectionRawMutex, DisplayMode, 2> = Watch::new();
 
 /// Dedicated stack used for the second CPU core executor.
 ///
@@ -33,4 +32,4 @@ pub struct CsiFrame {
 }
 
 /// Channel carrying processed CSI frames from capture to renderer.
-pub static CSI_FRAMES: Channel<RawPriorityLimitedMutex, CsiFrame, 32> = Channel::new();
+pub static CSI_FRAMES: Channel<CriticalSectionRawMutex, CsiFrame, 32> = Channel::new();

@@ -1,0 +1,61 @@
+name: Compile Matrix (ESP32-S3)
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  compile-with-cargo-hack:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Cache cargo registry + git + target
+        if: ${{ env.ACT != 'true' }}
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}-cargo-hack
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Ensure Rust toolchain is available
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v cargo >/dev/null 2>&1; then
+            curl https://sh.rustup.rs -sSf | sh -s -- -y --profile minimal
+          fi
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+
+      - name: Install espup
+        shell: bash
+        run: cargo +stable install espup --locked
+
+      - name: Install cargo-hack
+        shell: bash
+        run: cargo +stable install cargo-hack --locked
+
+      - name: Install ESP toolchain
+        shell: bash
+        run: espup install --targets esp32s3 --export-file "$HOME/export-esp.sh"
+
+      - name: Compile check with cargo-hack (board/mode powerset)
+        shell: bash
+        run: |
+          source "$HOME/export-esp.sh"
+          cargo hack check \
+            --release \
+            --feature-powerset \
+            --depth 2 \
+            --include-features "lilygo-t4,waveshare-esp32-s3-touch-amoled-1_8,mode-sta,mode-now,mode-snf" \
+            --exclude-features "no-std,println,auto,async-print,defmt,jtag-serial,uart" \
+            --at-least-one-of "lilygo-t4,waveshare-esp32-s3-touch-amoled-1_8" \
+            --mutually-exclusive-features "lilygo-t4,waveshare-esp32-s3-touch-amoled-1_8" \
+            --mutually-exclusive-features "mode-sta,mode-snf"
