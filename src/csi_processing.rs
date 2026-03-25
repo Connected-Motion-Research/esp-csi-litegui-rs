@@ -13,37 +13,51 @@ pub fn swap_upper_lower<T>(arr: &mut [T]) {
     }
 }
 
-/// Applies a centered moving average to amplitude values.
-///
-/// `window` controls the smoothing kernel width.
-pub fn smooth_amplitude(
+/// Fast 3-tap smoothing specialized for amplitude data.
+pub fn smooth_amplitude3(
     amplitude: &[f32; VALID_SUBCARRIER_COUNT],
-    window: usize,
 ) -> [f32; VALID_SUBCARRIER_COUNT] {
     let mut smoothed = [0.0; VALID_SUBCARRIER_COUNT];
-    for i in 0..VALID_SUBCARRIER_COUNT {
-        let start = i.saturating_sub(window / 2);
-        let end = (i + window / 2 + 1).min(VALID_SUBCARRIER_COUNT);
-        let sum: f32 = amplitude[start..end].iter().sum();
-        smoothed[i] = sum / (end - start) as f32;
+    if VALID_SUBCARRIER_COUNT == 0 {
+        return smoothed;
     }
+
+    if VALID_SUBCARRIER_COUNT == 1 {
+        smoothed[0] = amplitude[0];
+        return smoothed;
+    }
+
+    smoothed[0] = (amplitude[0] + amplitude[1]) * 0.5;
+    for i in 1..(VALID_SUBCARRIER_COUNT - 1) {
+        smoothed[i] = (amplitude[i - 1] + amplitude[i] + amplitude[i + 1]) / 3.0;
+    }
+    smoothed[VALID_SUBCARRIER_COUNT - 1] =
+        (amplitude[VALID_SUBCARRIER_COUNT - 2] + amplitude[VALID_SUBCARRIER_COUNT - 1]) * 0.5;
+
     smoothed
 }
 
-/// Applies a centered moving average to phase values.
-///
-/// `window` controls the smoothing kernel width.
-pub fn smooth_phase(
+/// Fast 3-tap smoothing specialized for phase data.
+pub fn smooth_phase3(
     phase: &[f32; VALID_SUBCARRIER_COUNT],
-    window: usize,
 ) -> [f32; VALID_SUBCARRIER_COUNT] {
     let mut smoothed = [0.0; VALID_SUBCARRIER_COUNT];
-    for i in 0..VALID_SUBCARRIER_COUNT {
-        let start = i.saturating_sub(window / 2);
-        let end = (i + window / 2 + 1).min(VALID_SUBCARRIER_COUNT);
-        let sum: f32 = phase[start..end].iter().sum();
-        smoothed[i] = sum / (end - start) as f32;
+    if VALID_SUBCARRIER_COUNT == 0 {
+        return smoothed;
     }
+
+    if VALID_SUBCARRIER_COUNT == 1 {
+        smoothed[0] = phase[0];
+        return smoothed;
+    }
+
+    smoothed[0] = (phase[0] + phase[1]) * 0.5;
+    for i in 1..(VALID_SUBCARRIER_COUNT - 1) {
+        smoothed[i] = (phase[i - 1] + phase[i] + phase[i + 1]) / 3.0;
+    }
+    smoothed[VALID_SUBCARRIER_COUNT - 1] =
+        (phase[VALID_SUBCARRIER_COUNT - 2] + phase[VALID_SUBCARRIER_COUNT - 1]) * 0.5;
+
     smoothed
 }
 

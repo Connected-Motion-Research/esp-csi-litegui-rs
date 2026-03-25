@@ -2,7 +2,7 @@
 
 use crate::{
     config::{CsiOperationMode, DisplayMode, VALID_SUBCARRIER_COUNT},
-    csi_processing::{smooth_amplitude, smooth_phase, swap_upper_lower, unwrap_phase},
+    csi_processing::{smooth_amplitude3, smooth_phase3, swap_upper_lower, unwrap_phase},
     state::{CSI_FRAMES, CsiFrame, DISPLAY_MODE},
 };
 use embassy_executor::task;
@@ -88,6 +88,11 @@ pub async fn csi_task(mut node_handle: CSINodeClient) {
         } else if raw.len() >= 128 {
             &mut raw[..128]
         } else {
+            packets_since_yield = packets_since_yield.wrapping_add(1);
+            if packets_since_yield >= 4 {
+                packets_since_yield = 0;
+                yield_now().await;
+            }
             continue;
         };
 
@@ -106,7 +111,8 @@ pub async fn csi_task(mut node_handle: CSINodeClient) {
                     if real == 0.0 && imag == 0.0 {
                         amplitude[i] = if i > 0 { amplitude[i - 1] } else { 0.0 };
                     } else {
-                        amplitude[i] = (real * real + imag * imag).sqrt();
+                        // Skip sqrt to reduce per-packet FP overhead.
+                        amplitude[i] = real * real + imag * imag;
                     }
                 }
 
@@ -115,15 +121,13 @@ pub async fn csi_task(mut node_handle: CSINodeClient) {
                 valid_amplitude[0..26].copy_from_slice(&amplitude[6..32]);
                 valid_amplitude[26..52].copy_from_slice(&amplitude[33..59]);
 
-                let smoothed_amplitude = smooth_amplitude(&valid_amplitude, 3);
-                let max_amplitude = smoothed_amplitude
-                    .iter()
-                    .cloned()
-                    .fold(f32::NEG_INFINITY, f32::max);
-                let min_amplitude = smoothed_amplitude
-                    .iter()
-                    .cloned()
-                    .fold(f32::INFINITY, f32::min);
+                let smoothed_amplitude = smooth_amplitude3(&valid_amplitude);
+                let mut min_amplitude = f32::INFINITY;
+                let mut max_amplitude = f32::NEG_INFINITY;
+                for value in smoothed_amplitude {
+                    min_amplitude = min_amplitude.min(value);
+                    max_amplitude = max_amplitude.max(value);
+                }
                 let amplitude_range = if max_amplitude - min_amplitude > 0.0 {
                     max_amplitude - min_amplitude
                 } else {
@@ -157,12 +161,13 @@ pub async fn csi_task(mut node_handle: CSINodeClient) {
                 valid_phase[0..26].copy_from_slice(&phase[6..32]);
                 valid_phase[26..52].copy_from_slice(&phase[33..59]);
 
-                let smoothed_phase = smooth_phase(&valid_phase, 3);
-                let max_phase = smoothed_phase
-                    .iter()
-                    .cloned()
-                    .fold(f32::NEG_INFINITY, f32::max);
-                let min_phase = smoothed_phase.iter().cloned().fold(f32::INFINITY, f32::min);
+                let smoothed_phase = smooth_phase3(&valid_phase);
+                let mut min_phase = f32::INFINITY;
+                let mut max_phase = f32::NEG_INFINITY;
+                for value in smoothed_phase {
+                    min_phase = min_phase.min(value);
+                    max_phase = max_phase.max(value);
+                }
                 let phase_range = max_phase - min_phase;
 
                 if phase_range > 0.0 {
@@ -190,7 +195,7 @@ pub async fn csi_task(mut node_handle: CSINodeClient) {
         // Cooperative scheduling: avoid starving other async tasks (e.g. radio runtime)
         // when CSI arrives at high packet rates for extended periods.
         packets_since_yield = packets_since_yield.wrapping_add(1);
-        if packets_since_yield >= 8 {
+        if packets_since_yield >= 2 {
             packets_since_yield = 0;
             yield_now().await;
         }
