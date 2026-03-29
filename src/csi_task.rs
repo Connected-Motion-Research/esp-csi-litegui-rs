@@ -18,14 +18,14 @@ pub fn configure_node_radio(node: &mut CSINode<'_>, mode: CsiOperationMode) {
         CsiOperationMode::WifiStation => {
             // Station mode CSI capture - lock to highest 11n rate for maximum packet density.
             node.set_protocol(Protocol::P802D11BGN);
-            node.set_rate(WifiPhyRate::RateMcs7Lgi);
+            node.set_rate(WifiPhyRate::RateMcs0Lgi);
         }
         CsiOperationMode::EspNow => {
             // For interoperability, avoid forcing a fixed PHY rate in ESP-NOW mode.
             // Different peers (e.g. ESP32-C6 examples) may transmit at non-MCS rates,
             // and forcing MCS0 can reduce/lose CSI capture.
             node.set_protocol(Protocol::P802D11BGNLR);
-            node.set_rate(WifiPhyRate::RateMcs7Lgi);
+            node.set_rate(WifiPhyRate::RateMcs0Lgi);
         }
         CsiOperationMode::WifiSniffer => {
             // Sniffer captures packets on the CURRENT tuned Wi-Fi channel.
@@ -33,7 +33,7 @@ pub fn configure_node_radio(node: &mut CSINode<'_>, mode: CsiOperationMode) {
             // Protocol mask below broadens frame/rate compatibility on that channel.
             node.set_protocol(Protocol::P802D11BGNLR);
             // Use MCS0 to maximize capture of low-rate frames which are common in beacons/management.
-            node.set_rate(WifiPhyRate::RateMcs7Lgi);
+            node.set_rate(WifiPhyRate::RateMcs0Lgi);
         }
     }
 }
