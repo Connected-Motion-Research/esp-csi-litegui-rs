@@ -149,7 +149,7 @@ dependencies = [
 [[package]]
 name = "cst226-rs"
 version = "0.1.1"
-source = "git+https://github.com/stacks-of-data/cst226-rs?rev=64fc1b958a164d18ccb8bc60e9d252f800f47aa1#64fc1b958a164d18ccb8bc60e9d252f800f47aa1"
+source = "git+https://github.com/theembeddedrustacean/cst226-rs?rev=e62da7e3930f1e541523e7a72a7160eaf48174d2#e62da7e3930f1e541523e7a72a7160eaf48174d2"
 dependencies = [
  "embedded-hal 1.0.0",
  "heapless 0.9.2",
@@ -767,7 +767,7 @@ dependencies = [
 [[package]]
 name = "esp-csi-rs"
 version = "0.4.1"
-source = "git+https://github.com/csi-rs/esp-csi-rs?rev=74707d4fcd2624b323e69115b61bea47f4532582#74707d4fcd2624b323e69115b61bea47f4532582"
+source = "git+https://github.com/csi-rs/esp-csi-rs?rev=075d31fd9ed6c7c68589fef0b101baa1c1fa3f91#075d31fd9ed6c7c68589fef0b101baa1c1fa3f91"
 dependencies = [
  "defmt 1.0.1",
  "defmt-rtt",
