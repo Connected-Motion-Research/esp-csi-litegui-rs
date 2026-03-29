@@ -7,8 +7,10 @@
 //! for rendering.
 //!
 //! This binary initializes board peripherals, configures CSI collection,
-//! starts the rendering task on the second core, and runs the touch/gesture
-//! task on the primary core.
+//! and splits rendering/touch tasks per board profile:
+//! - LilyGo: display + touch gesture tasks run on the second core.
+//! - Waveshare: display runs on the second core, FT3x68 gesture task runs on
+//!   the main executor to avoid render starvation from touch I2C reads.
 //!
 //! ## Supported boards
 //!
@@ -118,10 +120,12 @@ use rm690b0_rs::{
 use static_cell::StaticCell;
 #[cfg(feature = "lilygo-t4")]
 use cst226_rs::{CST226_DEVICE_ADDRESS, Cst226Driver};
+#[cfg(feature = "waveshare-esp32-s3-touch-amoled-1_8")]
+use ft3x68_rs::{FT3168_DEVICE_ADDRESS, Ft3x68Driver};
 use esp_radio::wifi::ClientConfig;
 
 use crate::alloc::string::ToString;
-use config::{BOARD_NAME, CSI_OPERATION_MODE, CsiOperationMode, DisplayMode, DISPLAY_SIZE, FB_SIZE};
+use config::{BOARD_NAME, CSI_OPERATION_MODE, CsiOperationMode, DISPLAY_SIZE, FB_SIZE};
 use csi_task::configure_node_radio;
 #[cfg(feature = "lilygo-t4")]
 use gesture_task::display_gesture_runner;
@@ -131,7 +135,7 @@ use gesture_task::waveshare_touch_runner;
 use reset::NoopResetDriver;
 #[cfg(feature = "lilygo-t4")]
 use reset::ResetDriver;
-use state::{APP_CORE_STACK, DISPLAY_MODE, WIFI_CONTROLLER};
+use state::{APP_CORE_STACK, MODE_INTENTS, WIFI_CONTROLLER};
 
 mod config;
 mod csi_processing;
@@ -288,6 +292,19 @@ async fn main(spawner: Spawner) {
     #[cfg(feature = "lilygo-t4")]
     let mut touch = Cst226Driver::new(touch_i2c, CST226_DEVICE_ADDRESS, touch_reset_driver, delay);
 
+    #[cfg(feature = "waveshare-esp32-s3-touch-amoled-1_8")]
+    let mut touch = Ft3x68Driver::new(touch_i2c, FT3168_DEVICE_ADDRESS, NoopResetDriver, Delay::new());
+
+    #[cfg(feature = "waveshare-esp32-s3-touch-amoled-1_8")]
+    {
+        if let Err(e) = touch.initialize() {
+            log_ln!("Failed to initialize FT3x68 touch driver: {:?}", e);
+        }
+        if let Err(e) = touch.set_gesture_mode(true) {
+            log_ln!("Failed to enable FT3x68 gesture mode: {:?}", e);
+        }
+    }
+
     // Instantiate and Initialize Display Driver
     log_ln!("Initializing Display...");
     let display_res = Rm690b0Driver::new_heap::<_, FB_SIZE>(
@@ -337,8 +354,8 @@ async fn main(spawner: Spawner) {
     let mut node = match CSI_OPERATION_MODE {
         CsiOperationMode::WifiStation => {
             let client_config = ClientConfig::default()
-                .with_ssid("Connected Motion ".to_string())
-                .with_password("automotion@123".to_string())
+                .with_ssid("SSID".to_string())
+                .with_password("PASS".to_string())
                 .with_auth_method(esp_radio::wifi::AuthMethod::Wpa2Personal)
                 .with_channel(1);
 
@@ -373,7 +390,7 @@ async fn main(spawner: Spawner) {
 
     spawner.spawn(csi_task::csi_task(node_handle)).ok();
 
-    // Spawn Display Task on Second Core
+    // Spawn display task(s) on second core.
     let sw_int = esp_hal::interrupt::software::SoftwareInterruptControl::new(peripherals.SW_INTERRUPT);
 
     #[cfg(feature = "lilygo-t4")]
@@ -383,8 +400,7 @@ async fn main(spawner: Spawner) {
             .initialize()
             .expect("Failed to initialize touch driver");
 
-        // Spawn display + gesture tasks on a separate core so touch I2C activity
-        // cannot stall CSI/node runtime on the main core.
+        // Keep display rendering on a dedicated core for responsiveness.
         esp_rtos::start_second_core::<32768>(
             peripherals.CPU_CTRL,
             sw_int.software_interrupt0,
@@ -399,7 +415,7 @@ async fn main(spawner: Spawner) {
                         .spawn(display_gesture_runner(
                             touch_int,
                             touch,
-                            DISPLAY_MODE.sender(),
+                            MODE_INTENTS.sender(),
                         ))
                         .ok();
                 });
@@ -409,8 +425,16 @@ async fn main(spawner: Spawner) {
 
     #[cfg(feature = "waveshare-esp32-s3-touch-amoled-1_8")]
     {
-        // Spawn display + gesture tasks on a separate core so touch I2C activity
-        // cannot stall CSI/node runtime on the main core.
+        // Run touch on the main executor so blocking I2C reads cannot stall display rendering.
+        spawner
+            .spawn(waveshare_touch_runner(
+                touch_int,
+                touch,
+                MODE_INTENTS.sender(),
+            ))
+            .ok();
+
+        // Keep display rendering on a separate core.
         esp_rtos::start_second_core::<32768>(
             peripherals.CPU_CTRL,
             sw_int.software_interrupt0,
@@ -421,22 +445,10 @@ async fn main(spawner: Spawner) {
                 let executor = EXECUTOR.init(esp_rtos::embassy::Executor::new());
                 executor.run(|spawner| {
                     spawner.spawn(display_task::display_task(display)).ok();
-                    spawner
-                        .spawn(waveshare_touch_runner(
-                            touch_int,
-                            touch_i2c,
-                            DISPLAY_MODE.sender(),
-                        ))
-                        .ok();
                 });
             },
         );
     }
-
-    // Set the current display mode (default to Magnitude), acquire Watch sender, and update Watch variable.
-    let current_display_mode = DisplayMode::Magnitude;
-    let display_mode_watch = DISPLAY_MODE.sender();
-    display_mode_watch.send(current_display_mode);
 
     // Keep CSI/node runtime isolated on the main core.
     node.run().await;

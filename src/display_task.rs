@@ -10,7 +10,6 @@ use embedded_graphics::{
     primitives::{PrimitiveStyleBuilder, Rectangle},
     text::Text,
 };
-use esp_csi_rs::log_ln;
 use profont::{PROFONT_18_POINT, PROFONT_24_POINT};
 use rm690b0_rs::{ColorMode, Lgt4s3Driver, Rm690b0Driver};
 
@@ -19,7 +18,7 @@ use crate::{
         DISPLAY_SIZE, DisplayMode, DisplayResetDriver, HEATMAP_EFFECTIVE_HEIGHT, HEATMAP_EFFECTIVE_WIDTH,
         HEATMAP_START_X, HEATMAP_START_Y, VALID_SUBCARRIER_COUNT,
     },
-    state::{CSI_FRAMES, DISPLAY_MODE},
+    state::{CSI_FRAMES, MODE_INTENTS, ModeIntent},
 };
 
 #[task]
@@ -82,8 +81,7 @@ pub async fn display_task(
     .unwrap();
 
     let mut current_display_mode = DisplayMode::Magnitude;
-    let mut display_watch = DISPLAY_MODE.receiver().unwrap();
-    let mut pending_display_mode: Option<DisplayMode> = None;
+    let mut desired_display_mode = DisplayMode::Magnitude;
     let mut last_mode_apply: Option<Instant> = None;
     const MODE_APPLY_MIN_INTERVAL: Duration = Duration::from_millis(450);
 
@@ -144,18 +142,20 @@ pub async fn display_task(
     let extra_rows: u32 = total_height % VALID_SUBCARRIER_COUNT as u32;
 
     loop {
-        while let Some(new_mode) = display_watch.try_changed() {
-            pending_display_mode = Some(new_mode);
+        while let Ok(intent) = MODE_INTENTS.try_receive() {
+            desired_display_mode = match intent {
+                ModeIntent::Next => desired_display_mode.next(),
+                ModeIntent::Previous => desired_display_mode.previous(),
+            };
         }
 
-        if let Some(new_mode) = pending_display_mode {
+        if desired_display_mode != current_display_mode {
             let interval_ok = last_mode_apply
                 .map(|t| Instant::now().saturating_duration_since(t) >= MODE_APPLY_MIN_INTERVAL)
                 .unwrap_or(true);
 
-            if interval_ok && new_mode != current_display_mode {
-                current_display_mode = new_mode;
-                pending_display_mode = None;
+            if interval_ok {
+                current_display_mode = desired_display_mode;
                 last_mode_apply = Some(Instant::now());
 
                 draw_title(&mut display_driver, current_display_mode);
@@ -179,8 +179,6 @@ pub async fn display_task(
                         ColorMode::Rgb888,
                     )
                     .ok();
-            } else if new_mode == current_display_mode {
-                pending_display_mode = None;
             }
         }
 
@@ -293,43 +291,25 @@ pub async fn display_task(
                 x_end = x_start + even_width - 1;
                 y_end = y_start + even_height - 1;
 
-                if let Err(e) = display_driver.partial_flush(
+                let _ = display_driver.partial_flush(
                     x_start as u16,
                     x_end as u16,
                     y_start as u16,
                     y_end as u16,
                     ColorMode::Rgb888,
-                ) {
-                    log_ln!(
-                        "Error flushing columns {}..{} (x:{}..{}): {:?}",
-                        col_start,
-                        col_end_exclusive - 1,
-                        x_start,
-                        x_end,
-                        e
-                    );
-                }
+                );
                 return;
             }
 
             #[cfg(feature = "lilygo-t4")]
             {
-                if let Err(e) = display_driver.partial_flush(
+                let _ = display_driver.partial_flush(
                     x_start_base as u16,
                     x_end_base as u16,
                     y_start_base as u16,
                     y_end_base as u16,
                     ColorMode::Rgb888,
-                ) {
-                    log_ln!(
-                        "Error flushing columns {}..{} (x:{}..{}): {:?}",
-                        col_start,
-                        col_end_exclusive - 1,
-                        x_start_base,
-                        x_end_base,
-                        e
-                    );
-                }
+                );
             }
         };
 

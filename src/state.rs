@@ -1,21 +1,28 @@
 //! Shared runtime state and inter-task channels.
 
-use embassy_sync::{
-    blocking_mutex::raw::CriticalSectionRawMutex, channel::Channel, watch::Watch,
-};
+use embassy_sync::channel::Channel;
 use esp_hal::system::Stack;
 use esp_radio::wifi::WifiController;
+use esp_sync::RawMutex;
 use static_cell::StaticCell;
 
-use crate::config::{DisplayMode, VALID_SUBCARRIER_COUNT};
+use crate::config::VALID_SUBCARRIER_COUNT;
 
 /// Global Wi-Fi controller storage initialized during startup.
 pub static WIFI_CONTROLLER: StaticCell<WifiController<'static>> = StaticCell::new();
 
-// The Watch construct immediately overwrites the previous value when a new one is sent, without waiting for all receivers to read the previous value.
-// The Watch sender is supposed to update only when a gesture is detected.
-/// Display mode watch channel used by gesture and display tasks.
-pub static DISPLAY_MODE: Watch<CriticalSectionRawMutex, DisplayMode, 2> = Watch::new();
+/// Relative display-mode change event produced by gesture tasks.
+#[allow(dead_code)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ModeIntent {
+    /// Move to the next display mode in the mode cycle.
+    Next,
+    /// Move to the previous display mode in the mode cycle.
+    Previous,
+}
+
+/// Ordered gesture intent channel consumed only by the display task.
+pub static MODE_INTENTS: Channel<RawMutex, ModeIntent, 8> = Channel::new();
 
 /// Dedicated stack used for the second CPU core executor.
 ///
@@ -32,4 +39,4 @@ pub struct CsiFrame {
 }
 
 /// Channel carrying processed CSI frames from capture to renderer.
-pub static CSI_FRAMES: Channel<CriticalSectionRawMutex, CsiFrame, 32> = Channel::new();
+pub static CSI_FRAMES: Channel<RawMutex, CsiFrame, 32> = Channel::new();

@@ -3,6 +3,8 @@
 use cst226_rs::ResetInterface;
 use core::convert::Infallible;
 use esp_hal::delay::Delay;
+#[cfg(feature = "waveshare-esp32-s3-touch-amoled-1_8")]
+use ft3x68_rs::ResetInterface as Ft3x68ResetInterface;
 use rm690b0_rs::ResetInterface as Rm6090b0ResetInterface;
 
 /// GPIO-based reset implementation reusable across supported drivers.
@@ -49,6 +51,23 @@ where
     }
 }
 
+#[cfg(feature = "waveshare-esp32-s3-touch-amoled-1_8")]
+impl<OUT> Ft3x68ResetInterface for ResetDriver<OUT>
+where
+    OUT: embedded_hal::digital::OutputPin,
+{
+    type Error = OUT::Error;
+
+    fn reset(&mut self) -> Result<(), Self::Error> {
+        let delay = Delay::new();
+        self.output.set_low()?;
+        delay.delay_millis(20);
+        self.output.set_high()?;
+        delay.delay_millis(150);
+        Ok(())
+    }
+}
+
 /// No-op reset implementation for hardware where reset is managed externally.
 pub struct NoopResetDriver;
 
@@ -61,6 +80,15 @@ impl ResetInterface for NoopResetDriver {
 }
 
 impl Rm6090b0ResetInterface for NoopResetDriver {
+    type Error = Infallible;
+
+    fn reset(&mut self) -> Result<(), Self::Error> {
+        Ok(())
+    }
+}
+
+#[cfg(feature = "waveshare-esp32-s3-touch-amoled-1_8")]
+impl Ft3x68ResetInterface for NoopResetDriver {
     type Error = Infallible;
 
     fn reset(&mut self) -> Result<(), Self::Error> {

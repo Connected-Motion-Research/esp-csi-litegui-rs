@@ -1,9 +1,9 @@
 //! CSI capture task and radio configuration helpers.
 
 use crate::{
-    config::{CsiOperationMode, DisplayMode, VALID_SUBCARRIER_COUNT},
+    config::{CsiOperationMode, VALID_SUBCARRIER_COUNT},
     csi_processing::{smooth_amplitude3, smooth_phase3, swap_upper_lower, unwrap_phase},
-    state::{CSI_FRAMES, CsiFrame, DISPLAY_MODE},
+    state::{CSI_FRAMES, CsiFrame},
 };
 use embassy_executor::task;
 use embassy_futures::yield_now;
@@ -41,36 +41,20 @@ pub fn configure_node_radio(node: &mut CSINode<'_>, mode: CsiOperationMode) {
 /// Background task that receives raw CSI packets and publishes normalized frames.
 ///
 /// The task computes both magnitude and phase representations and stores the
-/// most recent values into [`CSI_FRAMES`](crate::state::CSI_FRAMES).
+/// most recent values into [`CSI_FRAMES`](crate::state::CSI_FRAMES) using a
+/// freshness-first policy (drop oldest frame when the channel is full).
 #[task]
 pub async fn csi_task(mut node_handle: CSINodeClient) {
-    let mut display_mode = DisplayMode::Magnitude;
-    let mut display_watch = DISPLAY_MODE.receiver().unwrap();
     let mut packets_since_yield: u8 = 0;
 
     let mut cached_magnitude = [0.0; VALID_SUBCARRIER_COUNT];
     let mut cached_phase = [0.5; VALID_SUBCARRIER_COUNT];
 
     loop {
-        if let Some(new_mode) = display_watch.try_changed() {
-            display_mode = new_mode;
-        }
-
-        // Grab the next data with timeout so we can keep the pipeline alive and
-        // diagnose radio/runtime stalls instead of hard-freezing display updates.
+        // Grab data with timeout; if no packet arrives, skip publishing a frame.
         let mut packet = match with_timeout(Duration::from_millis(700), node_handle.get_csi_data()).await {
             Ok(packet) => packet,
             Err(_) => {
-                // Keep display task active by re-sending latest known frame.
-                let frame = CsiFrame {
-                    magnitude: cached_magnitude,
-                    phase: cached_phase,
-                };
-                if CSI_FRAMES.try_send(frame).is_err() {
-                    let _ = CSI_FRAMES.try_receive();
-                    let _ = CSI_FRAMES.try_send(frame);
-                }
-
                 packets_since_yield = packets_since_yield.wrapping_add(1);
                 if packets_since_yield >= 4 {
                     packets_since_yield = 0;
@@ -99,86 +83,69 @@ pub async fn csi_task(mut node_handle: CSINodeClient) {
         // Order the subcarrier data correctly
         swap_upper_lower(csi_payload);
 
-        match display_mode {
-            DisplayMode::Magnitude => {
-                let mut amplitude: [f32; 64] = [0.0; 64];
-                let sample_pairs = (csi_payload.len() / 2).min(64);
+        let mut amplitude: [f32; 64] = [0.0; 64];
+        let mut phase: [f32; 64] = [0.0; 64];
+        let sample_pairs = (csi_payload.len() / 2).min(64);
 
-                for i in 0..sample_pairs {
-                    let real = csi_payload[2 * i] as f32;
-                    let imag = csi_payload[2 * i + 1] as f32;
+        for i in 0..sample_pairs {
+            let real = csi_payload[2 * i] as f32;
+            let imag = csi_payload[2 * i + 1] as f32;
 
-                    if real == 0.0 && imag == 0.0 {
-                        amplitude[i] = if i > 0 { amplitude[i - 1] } else { 0.0 };
-                    } else {
-                        // Skip sqrt to reduce per-packet FP overhead.
-                        amplitude[i] = real * real + imag * imag;
-                    }
-                }
-
-                // Select valid subcarriers, skipping DC (index 32)
-                let mut valid_amplitude: [f32; VALID_SUBCARRIER_COUNT] = [0.0; VALID_SUBCARRIER_COUNT];
-                valid_amplitude[0..26].copy_from_slice(&amplitude[6..32]);
-                valid_amplitude[26..52].copy_from_slice(&amplitude[33..59]);
-
-                let smoothed_amplitude = smooth_amplitude3(&valid_amplitude);
-                let mut min_amplitude = f32::INFINITY;
-                let mut max_amplitude = f32::NEG_INFINITY;
-                for value in smoothed_amplitude {
-                    min_amplitude = min_amplitude.min(value);
-                    max_amplitude = max_amplitude.max(value);
-                }
-                let amplitude_range = if max_amplitude - min_amplitude > 0.0 {
-                    max_amplitude - min_amplitude
-                } else {
-                    1.0
-                };
-
-                for i in 0..VALID_SUBCARRIER_COUNT {
-                    cached_magnitude[i] = (smoothed_amplitude[i] - min_amplitude) / amplitude_range;
-                    cached_magnitude[i] = cached_magnitude[i].clamp(0.0, 1.0);
-                }
+            if real == 0.0 && imag == 0.0 {
+                amplitude[i] = if i > 0 { amplitude[i - 1] } else { 0.0 };
+                phase[i] = if i > 0 { phase[i - 1] } else { 0.0 };
+            } else {
+                // Skip sqrt to reduce per-packet FP overhead.
+                amplitude[i] = real * real + imag * imag;
+                phase[i] = imag.atan2(real);
             }
-            DisplayMode::Phase => {
-                let mut phase: [f32; 64] = [0.0; 64];
-                let sample_pairs = (csi_payload.len() / 2).min(64);
+        }
 
-                for i in 0..sample_pairs {
-                    let real = csi_payload[2 * i] as f32;
-                    let imag = csi_payload[2 * i + 1] as f32;
+        unwrap_phase(&mut phase);
 
-                    if real == 0.0 && imag == 0.0 {
-                        phase[i] = if i > 0 { phase[i - 1] } else { 0.0 };
-                    } else {
-                        phase[i] = imag.atan2(real);
-                    }
-                }
+        // Select valid subcarriers, skipping DC (index 32)
+        let mut valid_amplitude: [f32; VALID_SUBCARRIER_COUNT] = [0.0; VALID_SUBCARRIER_COUNT];
+        valid_amplitude[0..26].copy_from_slice(&amplitude[6..32]);
+        valid_amplitude[26..52].copy_from_slice(&amplitude[33..59]);
 
-                unwrap_phase(&mut phase);
+        let mut valid_phase: [f32; VALID_SUBCARRIER_COUNT] = [0.0; VALID_SUBCARRIER_COUNT];
+        valid_phase[0..26].copy_from_slice(&phase[6..32]);
+        valid_phase[26..52].copy_from_slice(&phase[33..59]);
 
-                // Select valid subcarriers, skipping DC (index 32)
-                let mut valid_phase: [f32; VALID_SUBCARRIER_COUNT] = [0.0; VALID_SUBCARRIER_COUNT];
-                valid_phase[0..26].copy_from_slice(&phase[6..32]);
-                valid_phase[26..52].copy_from_slice(&phase[33..59]);
+        let smoothed_amplitude = smooth_amplitude3(&valid_amplitude);
+        let mut min_amplitude = f32::INFINITY;
+        let mut max_amplitude = f32::NEG_INFINITY;
+        for value in smoothed_amplitude {
+            min_amplitude = min_amplitude.min(value);
+            max_amplitude = max_amplitude.max(value);
+        }
+        let amplitude_range = if max_amplitude - min_amplitude > 0.0 {
+            max_amplitude - min_amplitude
+        } else {
+            1.0
+        };
 
-                let smoothed_phase = smooth_phase3(&valid_phase);
-                let mut min_phase = f32::INFINITY;
-                let mut max_phase = f32::NEG_INFINITY;
-                for value in smoothed_phase {
-                    min_phase = min_phase.min(value);
-                    max_phase = max_phase.max(value);
-                }
-                let phase_range = max_phase - min_phase;
+        for i in 0..VALID_SUBCARRIER_COUNT {
+            cached_magnitude[i] = (smoothed_amplitude[i] - min_amplitude) / amplitude_range;
+            cached_magnitude[i] = cached_magnitude[i].clamp(0.0, 1.0);
+        }
 
-                if phase_range > 0.0 {
-                    for i in 0..VALID_SUBCARRIER_COUNT {
-                        cached_phase[i] = (smoothed_phase[i] - min_phase) / phase_range;
-                    }
-                } else {
-                    for i in 0..VALID_SUBCARRIER_COUNT {
-                        cached_phase[i] = 0.5;
-                    }
-                }
+        let smoothed_phase = smooth_phase3(&valid_phase);
+        let mut min_phase = f32::INFINITY;
+        let mut max_phase = f32::NEG_INFINITY;
+        for value in smoothed_phase {
+            min_phase = min_phase.min(value);
+            max_phase = max_phase.max(value);
+        }
+        let phase_range = max_phase - min_phase;
+
+        if phase_range > 0.0 {
+            for i in 0..VALID_SUBCARRIER_COUNT {
+                cached_phase[i] = (smoothed_phase[i] - min_phase) / phase_range;
+            }
+        } else {
+            for i in 0..VALID_SUBCARRIER_COUNT {
+                cached_phase[i] = 0.5;
             }
         }
 

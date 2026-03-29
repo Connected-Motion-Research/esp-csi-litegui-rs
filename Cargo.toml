@@ -34,12 +34,15 @@ uart = ["esp-csi-rs/uart"]
 
 ## Support for the Lilygo T4
 lilygo-t4 = [
-    "esp-csi-rs/esp32s3"
+    "esp-csi-rs/esp32s3",
+    "rm690b0-rs/lilygo_t4_s3"
 ]
 
 ## Support for Waveshare ESP32-S3-Touch-AMOLED-1.8
 waveshare-esp32-s3-touch-amoled-1_8 = [
-    "esp-csi-rs/esp32s3"
+    "esp-csi-rs/esp32s3",
+    "dep:ft3x68-rs",
+    "rm690b0-rs/lilygo_t4_s3"
 ]
 
 ## CSI operation mode feature flags
@@ -80,15 +83,17 @@ embassy-executor = { version = "0.9.1" }
 embassy-time = { version = "0.5.0" }
 static_cell = { version = "2.1.1" }
 embassy-sync = { version = "0.7.0" }
+esp-sync = { version = "0.1.1" }
 embassy-futures = { version = "0.1.1" }
 esp-csi-rs = { git = "https://github.com/csi-rs/esp-csi-rs", rev = "74707d4fcd2624b323e69115b61bea47f4532582", default-features = false }
 menu = "0.6.1"
 embedded-io = "0.6.1"
 micromath = "2.1.0"
-rm690b0-rs = { git = "https://github.com/stacks-of-data/rm690b0-rs.git", rev = "91bda339a18df6a1dac3fb6e9b032d5e0a00ba7c", features = ["lilygo_t4_s3"] }
+rm690b0-rs = { git = "https://github.com/theembeddedrustacean/rm690b0-rs", rev = "9a64745bcec75389943515232b5f21c5cbd8248d" }
 embedded-graphics = "0.8.2"
 profont = "0.7.0"
 cst226-rs = { git = "https://github.com/stacks-of-data/cst226-rs", rev = "64fc1b958a164d18ccb8bc60e9d252f800f47aa1" }
+ft3x68-rs = { version = "0.1.2", optional = true }
 embedded-hal = "1.0.0"
 log = { version = "0.4", default-features = false }
 
