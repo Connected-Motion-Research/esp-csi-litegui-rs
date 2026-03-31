@@ -1658,8 +1658,8 @@ dependencies = [
 
 [[package]]
 name = "rm690b0-rs"
-version = "0.1.1"
-source = "git+https://github.com/theembeddedrustacean/rm690b0-rs?rev=9a64745bcec75389943515232b5f21c5cbd8248d#9a64745bcec75389943515232b5f21c5cbd8248d"
+version = "0.1.2"
+source = "git+https://github.com/theembeddedrustacean/rm690b0-rs?rev=ce4e072bbf4a3f97851aec5005d1d9fddf7bb2b4#ce4e072bbf4a3f97851aec5005d1d9fddf7bb2b4"
 dependencies = [
  "critical-section",
  "document-features",

@@ -89,7 +89,7 @@ esp-csi-rs = { git = "https://github.com/csi-rs/esp-csi-rs", rev = "075d31fd9ed6
 menu = "0.6.1"
 embedded-io = "0.6.1"
 micromath = "2.1.0"
-rm690b0-rs = { git = "https://github.com/theembeddedrustacean/rm690b0-rs", rev = "9a64745bcec75389943515232b5f21c5cbd8248d" }
+rm690b0-rs = { git = "https://github.com/theembeddedrustacean/rm690b0-rs", rev = "ce4e072bbf4a3f97851aec5005d1d9fddf7bb2b4" }
 embedded-graphics = "0.8.2"
 profont = "0.7.0"
 cst226-rs = { git = "https://github.com/theembeddedrustacean/cst226-rs", rev = "e62da7e3930f1e541523e7a72a7160eaf48174d2" }

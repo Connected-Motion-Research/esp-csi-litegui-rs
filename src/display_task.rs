@@ -11,7 +11,7 @@ use embedded_graphics::{
     text::Text,
 };
 use profont::{PROFONT_18_POINT, PROFONT_24_POINT};
-use rm690b0_rs::{ColorMode, Lgt4s3Driver, Rm690b0Driver};
+use rm690b0_rs::{Lgt4s3Driver, Rm690b0Driver};
 
 use crate::{
     config::{
@@ -123,8 +123,7 @@ pub async fn display_task(
             0,
             (DISPLAY_SIZE.width - 1) as u16,
             0,
-            (DISPLAY_SIZE.height - 1) as u16,
-            ColorMode::Rgb888,
+            (DISPLAY_SIZE.height - 1) as u16
         )
         .unwrap();
 
@@ -175,8 +174,7 @@ pub async fn display_task(
                         HEATMAP_START_X as u16,
                         (HEATMAP_START_X + HEATMAP_EFFECTIVE_WIDTH - 1) as u16,
                         text_strip_y as u16,
-                        (HEATMAP_START_Y + HEATMAP_EFFECTIVE_HEIGHT - 1) as u16,
-                        ColorMode::Rgb888,
+                        (HEATMAP_START_Y + HEATMAP_EFFECTIVE_HEIGHT - 1) as u16
                     )
                     .ok();
             }
@@ -308,7 +306,6 @@ pub async fn display_task(
                     x_end_base as u16,
                     y_start_base as u16,
                     y_end_base as u16,
-                    ColorMode::Rgb888,
                 );
             }
         };
