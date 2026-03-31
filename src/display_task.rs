@@ -294,7 +294,6 @@ pub async fn display_task(
                     x_end as u16,
                     y_start as u16,
                     y_end as u16,
-                    ColorMode::Rgb888,
                 );
                 return;
             }
