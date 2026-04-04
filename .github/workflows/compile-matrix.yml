@@ -2,12 +2,29 @@ name: Compile Matrix (ESP32-S3)
 
 on:
   push:
-    branches: ["**"]
+    branches:
+      - main
+      - master
   pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
-  compile-with-cargo-hack:
+  compile-check:
+    name: ${{ matrix.board }} / ${{ matrix.mode }}
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        board:
+          - lilygo-t4
+          - waveshare-esp32-s3-touch-amoled-1_8
+        mode:
+          - mode-now
+          - mode-sta
+          - mode-snf
 
     steps:
       - name: Checkout
@@ -21,8 +38,9 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}-cargo-hack
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}-${{ matrix.board }}-${{ matrix.mode }}
           restore-keys: |
+            ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}-
             ${{ runner.os }}-cargo-
 
       - name: Ensure Rust toolchain is available
@@ -38,24 +56,16 @@ jobs:
         shell: bash
         run: cargo +stable install espup --locked
 
-      - name: Install cargo-hack
-        shell: bash
-        run: cargo +stable install cargo-hack --locked
-
       - name: Install ESP toolchain
         shell: bash
         run: espup install --targets esp32s3 --export-file "$HOME/export-esp.sh"
 
-      - name: Compile check with cargo-hack (board/mode powerset)
+      - name: Compile check
         shell: bash
         run: |
+          set -euo pipefail
           source "$HOME/export-esp.sh"
-          cargo hack check \
+          cargo check \
             --release \
-            --feature-powerset \
-            --depth 2 \
-            --include-features "lilygo-t4,waveshare-esp32-s3-touch-amoled-1_8,mode-sta,mode-now,mode-snf" \
-            --exclude-features "no-std,println,auto,async-print,defmt,jtag-serial,uart" \
-            --at-least-one-of "lilygo-t4,waveshare-esp32-s3-touch-amoled-1_8" \
-            --mutually-exclusive-features "lilygo-t4,waveshare-esp32-s3-touch-amoled-1_8" \
-            --mutually-exclusive-features "mode-sta,mode-snf"
+            --locked \
+            --features "${{ matrix.board }},${{ matrix.mode }}"
