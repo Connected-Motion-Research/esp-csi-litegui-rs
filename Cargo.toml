@@ -2,7 +2,7 @@
 edition      = "2024"
 name         = "esp-csi-litegui-rs"
 rust-version = "1.88"
-version      = "0.1.0"
+version      = "0.1.1"
 description  = "No-std CSI heatmap GUI firmware for ESP32 boards with AMOLED displays"
 license      = "Apache-2.0"
 repository   = "https://github.com/csi-rs/esp-csi-litegui-rs"
@@ -85,14 +85,14 @@ static_cell = { version = "2.1.1" }
 embassy-sync = { version = "0.7.0" }
 esp-sync = { version = "0.1.1" }
 embassy-futures = { version = "0.1.1" }
-esp-csi-rs = { git = "https://github.com/csi-rs/esp-csi-rs", rev = "075d31fd9ed6c7c68589fef0b101baa1c1fa3f91", default-features = false }
+esp-csi-rs = { version = "0.4.3", default-features = false }
 menu = "0.6.1"
 embedded-io = "0.6.1"
 micromath = "2.1.0"
-rm690b0-rs = { git = "https://github.com/theembeddedrustacean/rm690b0-rs", rev = "ce4e072bbf4a3f97851aec5005d1d9fddf7bb2b4" }
+rm690b0-rs = { version = "0.1.2" }
 embedded-graphics = "0.8.2"
 profont = "0.7.0"
-cst226-rs = { git = "https://github.com/theembeddedrustacean/cst226-rs", rev = "e62da7e3930f1e541523e7a72a7160eaf48174d2" }
+cst226-rs = { version = "0.1.2" }
 ft3x68-rs = { version = "0.1.2", optional = true }
 embedded-hal = "1.0.0"
 log = { version = "0.4", default-features = false }
