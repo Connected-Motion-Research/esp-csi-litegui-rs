@@ -64,6 +64,11 @@ pub const CSI_OPERATION_MODE: CsiOperationMode = CsiOperationMode::WifiStation;
 #[cfg(all(not(feature = "mode-snf"), not(feature = "mode-sta")))]
 pub const CSI_OPERATION_MODE: CsiOperationMode = CsiOperationMode::EspNow;
 
+/// 2.4 GHz channel (1–14) used for CSI capture in `EspNow` and `WifiSniffer`
+/// modes. Both this device and the transmitting peer MUST be on the same
+/// channel — a mismatch is silent and looks like "no packets are arriving".
+pub const CSI_CHANNEL: u8 = 1;
+
 // According to documentation the acquired array from ESP is an LLTF array with subcarriers ordered as follows: [0 to 31,-32 to -1]
 // There are several formats depending on supported training algortihim
 // Core library would have to integrate some indication for the type of CSI recieved if to be accomodated here

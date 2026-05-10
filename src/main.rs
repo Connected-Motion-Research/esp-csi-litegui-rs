@@ -98,7 +98,7 @@ use core::ptr::addr_of_mut;
 use embassy_executor::Spawner;
 use esp_bootloader_esp_idf::esp_app_desc;
 use esp_csi_rs::logging::logging::{LogMode, init_logger};
-use esp_csi_rs::{CSINode, CSINodeClient, CSINodeHardware, CollectionMode, EspNowConfig, WifiSnifferConfig, WifiStationConfig, config::CsiConfig, log_ln};
+use esp_csi_rs::{CSINode, CSINodeClient, CSINodeHardware, CollectionMode, EspNowConfig, WifiSnifferConfig, WifiStationConfig, config::CsiConfig, log_ln, set_csi_logging_enabled};
 use esp_hal::dma_buffers;
 use esp_hal::timer::timg::TimerGroup;
 use esp_hal::{
@@ -122,10 +122,10 @@ use static_cell::StaticCell;
 use cst226_rs::{CST226_DEVICE_ADDRESS, Cst226Driver};
 #[cfg(feature = "waveshare-esp32-s3-touch-amoled-1_8")]
 use ft3x68_rs::{FT3168_DEVICE_ADDRESS, Ft3x68Driver};
-use esp_radio::wifi::ClientConfig;
+use esp_radio::wifi::sta::StationConfig;
 
 use crate::alloc::string::ToString;
-use config::{BOARD_NAME, CSI_OPERATION_MODE, CsiOperationMode, DISPLAY_SIZE, FB_SIZE};
+use config::{BOARD_NAME, CSI_CHANNEL, CSI_OPERATION_MODE, CsiOperationMode, DISPLAY_SIZE, FB_SIZE};
 use csi_task::configure_node_radio;
 #[cfg(feature = "lilygo-t4")]
 use gesture_task::display_gesture_runner;
@@ -149,15 +149,6 @@ esp_app_desc!();
 
 extern crate alloc;
 
-macro_rules! mk_static {
-    ($t:ty,$val:expr) => {{
-        static STATIC_CELL: static_cell::StaticCell<$t> = static_cell::StaticCell::new();
-        #[deny(unused_attributes)]
-        let x = STATIC_CELL.uninit().write(($val));
-        x
-    }};
-}
-
 /// Firmware entry point.
 ///
 /// This function performs full system bring-up:
@@ -175,6 +166,12 @@ async fn main(spawner: Spawner) {
 
     // Required for `log_ln!` when `async-print` is enabled.
     init_logger(spawner, LogMode::Text);
+    // `init_logger` opens the inline per-packet CSI UART log gate. Close it
+    // immediately: the WiFi callback only falls through to that path while
+    // delivery mode is `Off`, so any CSI packet that arrives before
+    // `csi_task` first awaits `get_csi_data()` (which flips mode to `Async`)
+    // would otherwise be dumped to UART.
+    set_csi_logging_enabled(false);
     log_ln!("Board profile: {}", BOARD_NAME);
 
     esp_alloc::heap_allocator!(size: 61 * 1024);
@@ -329,35 +326,28 @@ async fn main(spawner: Spawner) {
 
     // Instantiate peripherals necessary to set up  WiFi
     let timg0 = TimerGroup::new(peripherals.TIMG0);
-    esp_rtos::start(timg0.timer0);
+    let sw_int = esp_hal::interrupt::software::SoftwareInterruptControl::new(peripherals.SW_INTERRUPT);
+    esp_rtos::start(timg0.timer0, sw_int.software_interrupt0);
 
     // Initialize WiFi Controller
-    let radio_init = mk_static!(
-        esp_radio::Controller<'static>,
-        esp_radio::init().expect("Failed to initialize Wi-Fi/BLE controller")
-    );
-
-    let mut config_radio = esp_radio::wifi::Config::default();
-    config_radio = config_radio.with_power_save_mode(esp_radio::wifi::PowerSaveMode::None);
+    // PowerSaveMode defaults to None in esp-radio 0.18, so no explicit override needed.
+    let config_radio = esp_radio::wifi::ControllerConfig::default();
     let (wifi_controller, mut interfaces) =
-        esp_radio::wifi::new(radio_init, peripherals.WIFI, config_radio)
+        esp_radio::wifi::new(peripherals.WIFI, config_radio)
             .expect("Failed to initialize Wi-Fi controller");
 
     let controller = WIFI_CONTROLLER.init(wifi_controller);
 
     log_ln!("WiFi Controller Initialized");
 
-    // Create a CSI Client Instance to handle CSI data and control messages
-    let node_handle = CSINodeClient::new();
     // Create a CSINodeHardware instance which will be used by the CSINode to interact with the Wi-Fi hardware
     let csi_hardware = CSINodeHardware::new(&mut interfaces, controller);
     let mut node = match CSI_OPERATION_MODE {
         CsiOperationMode::WifiStation => {
-            let client_config = ClientConfig::default()
-                .with_ssid("SSID".to_string())
+            let client_config = StationConfig::default()
+                .with_ssid("SSID")
                 .with_password("PASS".to_string())
-                .with_auth_method(esp_radio::wifi::AuthMethod::Wpa2Personal)
-                .with_channel(1);
+                .with_auth_method(esp_radio::wifi::AuthenticationMethod::Wpa2Personal);
 
                 let station_config = WifiStationConfig { client_config };
             CSINode::new(
@@ -369,30 +359,44 @@ async fn main(spawner: Spawner) {
             )
         }
         CsiOperationMode::EspNow => CSINode::new(
-            esp_csi_rs::Node::Central(esp_csi_rs::CentralOpMode::EspNow(EspNowConfig::default())),
-            CollectionMode::Collector,
-            Some(CsiConfig::default()),
-            Some(1000),
-            csi_hardware,
-        ),
-        CsiOperationMode::WifiSniffer => CSINode::new(
-            esp_csi_rs::Node::Peripheral(esp_csi_rs::PeripheralOpMode::WifiSniffer(
-                WifiSnifferConfig::default(),
+            esp_csi_rs::Node::Central(esp_csi_rs::CentralOpMode::EspNow(
+                EspNowConfig::default().with_channel(CSI_CHANNEL),
             )),
             CollectionMode::Collector,
             Some(CsiConfig::default()),
             Some(1000),
             csi_hardware,
         ),
+        CsiOperationMode::WifiSniffer => {
+            let sniffer_config = WifiSnifferConfig::default().with_channel(CSI_CHANNEL);
+            CSINode::new(
+                esp_csi_rs::Node::Peripheral(esp_csi_rs::PeripheralOpMode::WifiSniffer(
+                    sniffer_config,
+                )),
+                CollectionMode::Collector,
+                Some(CsiConfig::default()),
+                Some(1000),
+                csi_hardware,
+            )
+        }
     };
     configure_node_radio(&mut node, CSI_OPERATION_MODE);
-    log_ln!("CSI mode configured: {:?}", CSI_OPERATION_MODE);
+    log_ln!(
+        "CSI mode configured: {:?} on channel {}",
+        CSI_OPERATION_MODE,
+        CSI_CHANNEL
+    );
 
-    spawner.spawn(csi_task::csi_task(node_handle)).ok();
+    // The new esp-csi-rs API delivers CSI via `CSINodeClient::get_csi_data().await`.
+    // The first await lazily switches the lib's delivery mode to `Async` and
+    // opens the publish gate, so no `set_csi_callback` / `set_csi_logging_enabled`
+    // dance is needed here — `csi_task` just pulls from the lib's lock-free queue.
+    let csi_client = CSINodeClient::new();
+
+    spawner.spawn(csi_task::csi_task(csi_client).unwrap());
+    spawner.spawn(csi_task::stats_task().unwrap());
 
     // Spawn display task(s) on second core.
-    let sw_int = esp_hal::interrupt::software::SoftwareInterruptControl::new(peripherals.SW_INTERRUPT);
-
     #[cfg(feature = "lilygo-t4")]
     {
         // Initalize touch
@@ -403,21 +407,18 @@ async fn main(spawner: Spawner) {
         // Keep display rendering on a dedicated core for responsiveness.
         esp_rtos::start_second_core::<32768>(
             peripherals.CPU_CTRL,
-            sw_int.software_interrupt0,
             sw_int.software_interrupt1,
             unsafe { &mut *addr_of_mut!(APP_CORE_STACK) },
             move || {
                 static EXECUTOR: StaticCell<esp_rtos::embassy::Executor> = StaticCell::new();
                 let executor = EXECUTOR.init(esp_rtos::embassy::Executor::new());
                 executor.run(|spawner| {
-                    spawner.spawn(display_task::display_task(display)).ok();
-                    spawner
-                        .spawn(display_gesture_runner(
-                            touch_int,
-                            touch,
-                            MODE_INTENTS.sender(),
-                        ))
-                        .ok();
+                    spawner.spawn(display_task::display_task(display).unwrap());
+                    spawner.spawn(display_gesture_runner(
+                        touch_int,
+                        touch,
+                        MODE_INTENTS.sender(),
+                    ).unwrap());
                 });
             },
         );
@@ -426,25 +427,22 @@ async fn main(spawner: Spawner) {
     #[cfg(feature = "waveshare-esp32-s3-touch-amoled-1_8")]
     {
         // Run touch on the main executor so blocking I2C reads cannot stall display rendering.
-        spawner
-            .spawn(waveshare_touch_runner(
-                touch_int,
-                touch,
-                MODE_INTENTS.sender(),
-            ))
-            .ok();
+        spawner.spawn(waveshare_touch_runner(
+            touch_int,
+            touch,
+            MODE_INTENTS.sender(),
+        ).unwrap());
 
         // Keep display rendering on a separate core.
         esp_rtos::start_second_core::<32768>(
             peripherals.CPU_CTRL,
-            sw_int.software_interrupt0,
             sw_int.software_interrupt1,
             unsafe { &mut *addr_of_mut!(APP_CORE_STACK) },
             move || {
                 static EXECUTOR: StaticCell<esp_rtos::embassy::Executor> = StaticCell::new();
                 let executor = EXECUTOR.init(esp_rtos::embassy::Executor::new());
                 executor.run(|spawner| {
-                    spawner.spawn(display_task::display_task(display)).ok();
+                    spawner.spawn(display_task::display_task(display).unwrap());
                 });
             },
         );

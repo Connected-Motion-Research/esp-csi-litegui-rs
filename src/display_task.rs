@@ -18,8 +18,9 @@ use crate::{
         DISPLAY_SIZE, DisplayMode, DisplayResetDriver, HEATMAP_EFFECTIVE_HEIGHT, HEATMAP_EFFECTIVE_WIDTH,
         HEATMAP_START_X, HEATMAP_START_Y, VALID_SUBCARRIER_COUNT,
     },
-    state::{CSI_FRAMES, MODE_INTENTS, ModeIntent},
+    state::{CSI_FRAMES, MODE_INTENTS, ModeIntent, STATS},
 };
+use core::sync::atomic::Ordering;
 
 #[task]
 /// Background task that renders CSI frames to the display framebuffer and flushes updates.
@@ -130,10 +131,6 @@ pub async fn display_task(
     // column_width needs to be an even number for proper wrapping
     // Otherwise the last column will be thinner than the rest and heatmap wont scale properly.
     let column_width: u32 = 2;
-    #[cfg(feature = "lilygo-t4")]
-    let max_columns_per_cycle: u32 = 12;
-    #[cfg(feature = "waveshare-esp32-s3-touch-amoled-1_8")]
-    let max_columns_per_cycle: u32 = 1;
     let col_count = HEATMAP_EFFECTIVE_WIDTH / column_width;
     let mut current_col: u32 = 0;
     let total_height: u32 = HEATMAP_EFFECTIVE_HEIGHT;
@@ -187,12 +184,16 @@ pub async fn display_task(
 
         let mut next_frame = match first_frame {
             Some(frame) => Some(frame),
-            None => continue,
+            None => {
+                STATS.render_idle.fetch_add(1, Ordering::Relaxed);
+                continue;
+            }
         };
+        STATS.render_iters.fetch_add(1, Ordering::Relaxed);
         let start_col = current_col;
         let mut rendered_cols = 0u32;
 
-        while rendered_cols < max_columns_per_cycle {
+        loop {
             let csi_frame = if let Some(frame) = next_frame.take() {
                 frame
             } else {
@@ -247,6 +248,7 @@ pub async fn display_task(
 
             current_col = (current_col + 1) % col_count;
             rendered_cols += 1;
+            STATS.render_cols.fetch_add(1, Ordering::Relaxed);
 
             // Keep gesture task responsive on the same executor core.
             yield_now().await;
@@ -260,6 +262,7 @@ pub async fn display_task(
             if col_start >= col_end_exclusive {
                 return;
             }
+            STATS.render_flushes.fetch_add(1, Ordering::Relaxed);
 
             let x_start_base = HEATMAP_START_X + col_start * column_width;
             let x_end_base = HEATMAP_START_X + col_end_exclusive * column_width - 1;

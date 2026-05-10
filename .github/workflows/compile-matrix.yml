@@ -58,6 +58,11 @@ jobs:
 
       - name: Install ESP toolchain
         shell: bash
+        env:
+          # Authenticate espup's GitHub API calls so it doesn't hit the
+          # anonymous 60/hr rate limit when discovering the latest Xtensa
+          # Rust release (manifests as `403 Forbidden`).
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: espup install --targets esp32s3 --export-file "$HOME/export-esp.sh"
 
       - name: Compile check

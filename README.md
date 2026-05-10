@@ -127,7 +127,7 @@ Both boards publish mode-intent events consumed by the display task.
 - Waveshare: verify FT3x68 init and XCA9554 setup sequence.
 
 ## License
-Copyright 2025 The Embedded Rustacean
+Copyright 2025 The esp-csi Team
 
 Licensed under the Apache License, Version 2.0.
 http://www.apache.org/licenses/LICENSE-2.0
