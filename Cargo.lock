@@ -838,7 +838,7 @@ dependencies = [
 
 [[package]]
 name = "esp-csi-litegui-rs"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "cst226-rs",
  "embassy-executor",
@@ -865,9 +865,9 @@ dependencies = [
 
 [[package]]
 name = "esp-csi-rs"
-version = "0.6.0"
+version = "0.6.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "50bd58c9e2acff584fcf2b3152c348014fb3041b23411c0b41f4d7606d981b25"
+checksum = "198d5970bbc810049839b2c58e668cb9e308de4ea9a97577e6ad75804d036c08"
 dependencies = [
  "defmt 1.0.1",
  "document-features",
