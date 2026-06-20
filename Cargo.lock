@@ -838,7 +838,7 @@ dependencies = [
 
 [[package]]
 name = "esp-csi-litegui-rs"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "cst226-rs",
  "embassy-executor",
@@ -865,9 +865,9 @@ dependencies = [
 
 [[package]]
 name = "esp-csi-rs"
-version = "0.6.2"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "198d5970bbc810049839b2c58e668cb9e308de4ea9a97577e6ad75804d036c08"
+checksum = "f980f2dee93bf4bda9fcd5018f337747c49e2251a730e4b4438789d64fd19740"
 dependencies = [
  "defmt 1.0.1",
  "document-features",
@@ -2462,18 +2462,18 @@ dependencies = [
 
 [[package]]
 name = "zerocopy"
-version = "0.8.42"
+version = "0.8.52"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f2578b716f8a7a858b7f02d5bd870c14bf4ddbbcf3a4c05414ba6503640505e3"
+checksum = "ce1022995ff5ff5d841ad7d994facc23098cd40152f2c1d11cd607c6f530653f"
 dependencies = [
  "zerocopy-derive",
 ]
 
 [[package]]
 name = "zerocopy-derive"
-version = "0.8.42"
+version = "0.8.52"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7e6cc098ea4d3bd6246687de65af3f920c430e236bee1e3bf2e441463f08a02f"
+checksum = "1ae7f38b72ec2a254e2b87ef277cf2cd4fb97cbebf944faa6f33354da0867930"
 dependencies = [
  "proc-macro2",
  "quote",
