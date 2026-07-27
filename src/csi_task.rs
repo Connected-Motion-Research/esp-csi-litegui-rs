@@ -10,7 +10,7 @@ use embassy_executor::task;
 use embassy_futures::yield_now;
 use embassy_time::{Duration, Timer};
 use esp_csi_rs::{CSINode, CSINodeClient, log_ln};
-use esp_radio::{esp_now::WifiPhyRate, wifi::Protocol};
+use esp_radio::wifi::Protocol;
 use micromath::F32Ext;
 
 /// Length of the LLTF / HT-LTF I/Q payload in bytes (64 complex pairs of i8).
@@ -19,31 +19,18 @@ const RAW_CSI_PAYLOAD_LEN: usize = 128;
 /// Applies mode-specific radio settings used for CSI collection.
 pub fn configure_node_radio(node: &mut CSINode<'_>, mode: CsiOperationMode) {
     match mode {
-        CsiOperationMode::WifiStation => {
-            // Station mode CSI capture - lock to highest 11n rate for maximum packet density.
-            node.set_protocol(Protocol::N);
-        }
-        CsiOperationMode::EspNow => {
-            // For interoperability, avoid forcing a fixed PHY rate in ESP-NOW mode.
-            // Different peers (e.g. ESP32-C6 examples) may transmit at non-MCS rates,
-            // and forcing MCS0 can reduce/lose CSI capture.
-            node.set_protocol(Protocol::N);
-            node.set_rate(WifiPhyRate::RateMcs0Lgi);
-        }
-        CsiOperationMode::WifiSniffer => {
-            // Sniffer captures packets on the CURRENT tuned Wi-Fi channel.
-            // Current esp-csi-rs/esp-radio path does not expose automatic channel hopping.
-            // LR broadens frame/rate compatibility on that channel.
+        CsiOperationMode::Sniffer => {
+            // The sniffer captures on the CURRENT tuned channel; esp-csi-rs does
+            // not hop automatically. LR broadens frame/rate compatibility there.
             node.set_protocol(Protocol::LR);
         }
-        CsiOperationMode::WifiAccessPoint => {
-            // 11n uplink from the associated station maximizes HT-LTF CSI
-            // density from the ICMP echo replies.
+        CsiOperationMode::Station => {
+            // Lock to 11n for maximum packet density on the associated link.
             node.set_protocol(Protocol::N);
         }
-        CsiOperationMode::EspNowFastCollector => {
-            // Protocol::N only — EspNowConfig::fast_default() already forces
-            // the per-peer PHY to MCS7; set_rate here would clobber it.
+        CsiOperationMode::AccessPoint => {
+            // 11n uplink from the associated station maximizes HT-LTF CSI
+            // density from the ICMP echo replies.
             node.set_protocol(Protocol::N);
         }
     }

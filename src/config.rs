@@ -39,70 +39,42 @@ impl DisplayMode {
 #[derive(Clone, Copy, Debug)]
 #[allow(dead_code)]
 pub enum CsiOperationMode {
-    /// Station mode CSI, typically using an AP link.
-    WifiStation,
-    /// ESP-NOW based CSI collection.
-    EspNow,
-    /// Passive Wi-Fi sniffer CSI collection.
-    WifiSniffer,
+    /// Passive promiscuous capture on a locked channel. Pairs with an emitter
+    /// board (esp-csi-rs `ht20_emitter` / `ht40_emitter`) on the same channel,
+    /// and also picks up ambient traffic.
+    Sniffer,
+    /// Associate to an AP and capture CSI from the frames received on that link.
+    Station,
     /// Self-contained softAP collector: this board runs an AP + DHCP server and
     /// pings the leased station; CSI is captured from its uplink echo replies.
-    WifiAccessPoint,
-    /// Fast one-to-one ESP-NOW collector (asymmetric simplex): RX-only capture
-    /// of a peer `EspNowFastSource`'s forced-MCS7 unicast flood.
-    EspNowFastCollector,
+    AccessPoint,
 }
 
-#[cfg(all(feature = "mode-sta", feature = "mode-snf"))]
-compile_error!("Enable only one override mode: 'mode-sta', 'mode-snf', 'mode-ap' or 'mode-fast'");
 #[cfg(all(feature = "mode-sta", feature = "mode-ap"))]
-compile_error!("Enable only one override mode: 'mode-sta', 'mode-snf', 'mode-ap' or 'mode-fast'");
-#[cfg(all(feature = "mode-sta", feature = "mode-fast"))]
-compile_error!("Enable only one override mode: 'mode-sta', 'mode-snf', 'mode-ap' or 'mode-fast'");
-#[cfg(all(feature = "mode-snf", feature = "mode-ap"))]
-compile_error!("Enable only one override mode: 'mode-sta', 'mode-snf', 'mode-ap' or 'mode-fast'");
-#[cfg(all(feature = "mode-snf", feature = "mode-fast"))]
-compile_error!("Enable only one override mode: 'mode-sta', 'mode-snf', 'mode-ap' or 'mode-fast'");
-#[cfg(all(feature = "mode-ap", feature = "mode-fast"))]
-compile_error!("Enable only one override mode: 'mode-sta', 'mode-snf', 'mode-ap' or 'mode-fast'");
+compile_error!("Enable only one mode: 'mode-snf', 'mode-sta' or 'mode-ap'");
 
 /// Selected CSI operating mode derived from Cargo features.
-#[cfg(feature = "mode-snf")]
-pub const CSI_OPERATION_MODE: CsiOperationMode = CsiOperationMode::WifiSniffer;
+///
+/// Sniffer is the default because it needs no peer configuration: point it at a
+/// channel and it captures whatever is there, including an emitter board's
+/// sounding frames.
+#[cfg(all(not(feature = "mode-sta"), not(feature = "mode-ap")))]
+pub const CSI_OPERATION_MODE: CsiOperationMode = CsiOperationMode::Sniffer;
 
 /// Selected CSI operating mode derived from Cargo features.
-#[cfg(all(not(feature = "mode-snf"), feature = "mode-sta"))]
-pub const CSI_OPERATION_MODE: CsiOperationMode = CsiOperationMode::WifiStation;
+#[cfg(feature = "mode-sta")]
+pub const CSI_OPERATION_MODE: CsiOperationMode = CsiOperationMode::Station;
 
 /// Selected CSI operating mode derived from Cargo features.
-#[cfg(all(not(feature = "mode-snf"), not(feature = "mode-sta"), feature = "mode-ap"))]
-pub const CSI_OPERATION_MODE: CsiOperationMode = CsiOperationMode::WifiAccessPoint;
+#[cfg(all(not(feature = "mode-sta"), feature = "mode-ap"))]
+pub const CSI_OPERATION_MODE: CsiOperationMode = CsiOperationMode::AccessPoint;
 
-/// Selected CSI operating mode derived from Cargo features.
-#[cfg(all(
-    not(feature = "mode-snf"),
-    not(feature = "mode-sta"),
-    not(feature = "mode-ap"),
-    feature = "mode-fast"
-))]
-pub const CSI_OPERATION_MODE: CsiOperationMode = CsiOperationMode::EspNowFastCollector;
-
-/// Selected CSI operating mode derived from Cargo features.
-#[cfg(all(
-    not(feature = "mode-snf"),
-    not(feature = "mode-sta"),
-    not(feature = "mode-ap"),
-    not(feature = "mode-fast")
-))]
-pub const CSI_OPERATION_MODE: CsiOperationMode = CsiOperationMode::EspNow;
-
-/// 2.4 GHz channel (1–14) used for CSI capture in `EspNow`, `WifiSniffer`,
-/// `WifiAccessPoint`, and `EspNowFastCollector` modes. Both this device and
-/// the transmitting peer MUST be on the same channel — a mismatch is silent
-/// and looks like "no packets are arriving".
+/// 2.4 GHz channel (1–14) used for CSI capture in `Sniffer` and `AccessPoint`
+/// modes. This device and the transmitting peer MUST be on the same channel — a
+/// mismatch is silent and looks like "no packets are arriving".
 pub const CSI_CHANNEL: u8 = 1;
 
-/// SSID broadcast by the softAP collector in `WifiAccessPoint` mode. Matches
+/// SSID broadcast by the softAP collector in `AccessPoint` mode. Matches
 /// the upstream esp-csi-rs `wifi_ap` example so an unmodified upstream
 /// `wifi_station` peer pairs out of the box.
 pub const AP_SSID: &str = "esp-csi-ap";

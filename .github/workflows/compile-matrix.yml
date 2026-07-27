@@ -22,9 +22,9 @@ jobs:
           - lilygo-t4
           - waveshare-esp32-s3-touch-amoled-1_8
         mode:
-          - mode-now
-          - mode-sta
           - mode-snf
+          - mode-sta
+          - mode-ap
 
     steps:
       - name: Checkout

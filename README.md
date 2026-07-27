@@ -44,20 +44,21 @@ Enable exactly one:
 - waveshare-esp32-s3-touch-amoled-1_8
 
 ### CSI Mode Features
-- mode-now (default)
-- mode-sta
-- mode-snf
+
+This board is always a **collector** — it renders a CSI heatmap, so it needs CSI to render. The modes differ only in where the measurable frames come from.
+
+- mode-snf (default) — promiscuous capture on a locked channel. Needs no peer configuration.
+- mode-sta — associate to an AP and capture CSI from that link.
 - mode-ap — softAP collector: the board runs an AP (SSID `esp-csi-ap`) with a built-in DHCP server and pings the associated station; CSI is captured from its uplink replies.
-- mode-fast — fast one-to-one ESP-NOW collector: RX-only capture of a forced-MCS7 unicast flood from a peer running the esp-csi-rs `esp_now_fast_source` example.
 
 Rules:
-- mode-now is enabled by default.
-- Only one of mode-sta / mode-snf / mode-ap / mode-fast can be enabled.
+- mode-snf is enabled by default.
+- Only one of mode-sta / mode-ap can be enabled.
 - You can enable an override mode without disabling defaults.
 
 Pairing notes:
+- mode-snf: pair with an **emitter** board running the esp-csi-rs `ht20_emitter` or `ht40_emitter` example on the same channel (this app uses channel 1; the examples default to 7 — change one side to match). An emitter sounds the channel with raw injected frames and needs no association, so nothing has to be configured on this side beyond the channel. Ambient traffic on the channel is also captured.
 - mode-ap: any Wi-Fi station joining `esp-csi-ap` works (e.g. the esp-csi-rs `wifi_station` example); clients get a 192.168.13.x lease from the built-in DHCP server, and CSI flows once a station associates.
-- mode-fast: requires a peer flashed with the esp-csi-rs `esp_now_fast_source` example on the same channel (this app uses channel 1; the upstream example defaults to 6 — change one side to match).
 
 ### Logging/Debug Features (optional)
 - println
@@ -80,14 +81,9 @@ Update SSID and password in src/main.rs where ClientConfig is created.
 
 ### 3. Build/run examples
 
-LilyGo + default mode-now:
+LilyGo + default sniffer mode:
 ```bash
 cargo run --release --features="lilygo-t4"
-```
-
-LilyGo + explicit mode-now:
-```bash
-cargo run --release --features="lilygo-t4,mode-now"
 ```
 
 LilyGo + station mode:
@@ -95,19 +91,14 @@ LilyGo + station mode:
 cargo run --release --features="lilygo-t4,mode-sta"
 ```
 
-LilyGo + sniffer mode:
+LilyGo + explicit sniffer mode:
 ```bash
 cargo run --release --features="lilygo-t4,mode-snf"
 ```
 
-Waveshare + default mode-now:
+Waveshare + default sniffer mode:
 ```bash
 cargo run --release --features="waveshare-esp32-s3-touch-amoled-1_8"
-```
-
-Waveshare + explicit mode-now:
-```bash
-cargo run --release --features="waveshare-esp32-s3-touch-amoled-1_8,mode-now"
 ```
 
 Waveshare + station mode:
@@ -115,7 +106,7 @@ Waveshare + station mode:
 cargo run --release --features="waveshare-esp32-s3-touch-amoled-1_8,mode-sta"
 ```
 
-Waveshare + sniffer mode:
+Waveshare + explicit sniffer mode:
 ```bash
 cargo run --release --features="waveshare-esp32-s3-touch-amoled-1_8,mode-snf"
 ```
@@ -125,19 +116,9 @@ LilyGo + softAP collector mode:
 cargo run --release --features="lilygo-t4,mode-ap"
 ```
 
-LilyGo + fast ESP-NOW collector mode:
-```bash
-cargo run --release --features="lilygo-t4,mode-fast"
-```
-
 Waveshare + softAP collector mode:
 ```bash
 cargo run --release --features="waveshare-esp32-s3-touch-amoled-1_8,mode-ap"
-```
-
-Waveshare + fast ESP-NOW collector mode:
-```bash
-cargo run --release --features="waveshare-esp32-s3-touch-amoled-1_8,mode-fast"
 ```
 
 ## Gesture Behavior

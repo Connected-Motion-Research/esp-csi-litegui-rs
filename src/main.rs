@@ -40,23 +40,25 @@
 //!
 //! ### CSI mode features
 //!
-//! - `mode-sta`: Wi-Fi station mode CSI collection.
-//! - `mode-now`: ESP-NOW mode CSI collection.
-//! - `mode-snf`: Wi-Fi sniffer mode CSI collection.
-//! - `mode-ap`: SoftAP collector — this board runs an AP (SSID `esp-csi-ap`)
-//!   with a built-in DHCP server and pings the associated station; CSI is
-//!   captured from its uplink replies. Pair with any Wi-Fi station, e.g. the
-//!   esp-csi-rs `wifi_station` example.
-//! - `mode-fast`: Fast one-to-one ESP-NOW collector — RX-only capture of a
-//!   forced-MCS7 unicast flood. Pair with a peer flashed with the esp-csi-rs
-//!   `esp_now_fast_source` example on the same channel.
+//! This board is always a *collector* — it renders a CSI heatmap, so it needs
+//! CSI to render. The three modes differ only in where the measurable frames
+//! come from:
+//!
+//! - `mode-snf` (default): promiscuous capture on a locked channel. Needs no peer
+//!   configuration. Pair with an emitter board running the esp-csi-rs
+//!   `ht20_emitter` / `ht40_emitter` example on the same channel, or just point it
+//!   at ambient traffic.
+//! - `mode-sta`: associate to an AP and capture CSI from that link.
+//! - `mode-ap`: SoftAP collector — this board runs an AP (SSID `esp-csi-ap`) with a
+//!   built-in DHCP server and pings the associated station; CSI is captured from
+//!   its uplink replies. Pair with any Wi-Fi station, e.g. the esp-csi-rs
+//!   `wifi_station` example.
 //!
 //! Notes:
 //!
-//! - `mode-now` is enabled by default.
-//! - You can safely override the default mode by enabling one of `mode-sta`,
-//!   `mode-snf`, `mode-ap`, or `mode-fast` without disabling default features.
-//! - Only one override mode can be enabled at a time.
+//! - `mode-snf` is the default; enabling `mode-sta` or `mode-ap` overrides it
+//!   without needing to disable default features.
+//! - Only one of `mode-sta` / `mode-ap` can be enabled at a time.
 //!
 //! ## Quick start
 //!
@@ -117,7 +119,7 @@ use core::ptr::addr_of_mut;
 use embassy_executor::Spawner;
 use esp_bootloader_esp_idf::esp_app_desc;
 use esp_csi_rs::logging::logging::{LogMode, auto_log_backend_label, init_logger};
-use esp_csi_rs::{CSINode, CSINodeClient, CSINodeHardware, CollectionMode, EspNowConfig, WifiApConfig, WifiSnifferConfig, WifiStationConfig, config::CsiConfig, install_static_espnow_recv, log_ln, set_csi_logging_enabled};
+use esp_csi_rs::{CSINode, CSINodeClient, CollectorMode, NodeHardware, WifiApConfig, WifiSnifferConfig, WifiStationConfig, config::CsiConfig, log_ln, set_csi_logging_enabled};
 use esp_hal::dma_buffers;
 use esp_hal::timer::timg::TimerGroup;
 use esp_hal::{
@@ -357,81 +359,50 @@ async fn main(spawner: Spawner) {
         esp_radio::wifi::new(peripherals.WIFI, config_radio)
             .expect("Failed to initialize Wi-Fi controller");
 
-    // Replace esp-radio's heap-backed ESP-NOW receive queue with esp-csi-rs's
-    // static pool as early as possible. `node.run()` performs the same takeover,
-    // but display/second-core bring-up sits between here and `run()`, and a
-    // nearby ESP-NOW transmitter can grow the heap queue during that window.
-    // Harmless in non-ESP-NOW modes (the sniffer suspends recv at run start).
-    install_static_espnow_recv();
-
     let controller = WIFI_CONTROLLER.init(wifi_controller);
     let _ = controller.set_power_saving(PowerSaveMode::None);
 
     log_ln!("WiFi Controller Initialized");
 
-    // Create a CSINodeHardware instance which will be used by the CSINode to interact with the Wi-Fi hardware
-    let csi_hardware = CSINodeHardware::new(&mut interfaces, controller);
+    // Hardware bundle the node uses to drive the Wi-Fi radio.
+    let csi_hardware = NodeHardware::new(&mut interfaces, controller);
     let mut node = match CSI_OPERATION_MODE {
-        CsiOperationMode::WifiStation => {
+        CsiOperationMode::Sniffer => {
+            let sniffer_config = WifiSnifferConfig::default().with_channel(CSI_CHANNEL);
+            CSINode::new_collector(
+                CollectorMode::Sniffer(sniffer_config),
+                Some(CsiConfig::default()),
+                Some(1000),
+                csi_hardware,
+            )
+        }
+        CsiOperationMode::Station => {
             let client_config = StationConfig::default()
                 .with_ssid("SSID")
                 .with_password("PASS".to_string())
                 .with_auth_method(esp_radio::wifi::AuthenticationMethod::Wpa2Personal);
 
-                let station_config = WifiStationConfig::new(client_config);
-            CSINode::new(
-                esp_csi_rs::Node::Central(esp_csi_rs::CentralOpMode::WifiStation(station_config)),
-                CollectionMode::Collector,
-                Some(CsiConfig::default()),
-                Some(1000),
-                csi_hardware
-            )
-        }
-        CsiOperationMode::EspNow => CSINode::new(
-            esp_csi_rs::Node::Central(esp_csi_rs::CentralOpMode::EspNow(
-                EspNowConfig::default().with_channel(CSI_CHANNEL),
-            )),
-            CollectionMode::Collector,
-            Some(CsiConfig::default()),
-            Some(1000),
-            csi_hardware,
-        ),
-        CsiOperationMode::WifiSniffer => {
-            let sniffer_config = WifiSnifferConfig::default().with_channel(CSI_CHANNEL);
-            CSINode::new(
-                esp_csi_rs::Node::Peripheral(esp_csi_rs::PeripheralOpMode::WifiSniffer(
-                    sniffer_config,
-                )),
-                CollectionMode::Collector,
+            let station_config = WifiStationConfig::new(client_config);
+            CSINode::new_collector(
+                CollectorMode::Station(station_config),
                 Some(CsiConfig::default()),
                 Some(1000),
                 csi_hardware,
             )
         }
-        CsiOperationMode::WifiAccessPoint => {
+        CsiOperationMode::AccessPoint => {
             let ap_radio_config = AccessPointConfig::default()
                 .with_ssid(AP_SSID)
                 .with_channel(CSI_CHANNEL);
             // Defaults: AP 192.168.13.1, single lease .2, DHCP server on.
             let ap_config = WifiApConfig::new(ap_radio_config, CSI_CHANNEL, None);
-            CSINode::new(
-                esp_csi_rs::Node::Central(esp_csi_rs::CentralOpMode::WifiAccessPoint(ap_config)),
-                CollectionMode::Collector,
+            CSINode::new_collector(
+                CollectorMode::AccessPoint(ap_config),
                 Some(CsiConfig::default()),
                 Some(AP_PING_RATE_HZ),
                 csi_hardware,
             )
         }
-        CsiOperationMode::EspNowFastCollector => CSINode::new(
-            esp_csi_rs::Node::Central(esp_csi_rs::CentralOpMode::EspNowFastCollector(
-                EspNowConfig::fast_default().with_channel(CSI_CHANNEL),
-            )),
-            CollectionMode::Collector,
-            Some(CsiConfig::default()),
-            // Collector is RX-only after discovery; the source generates the traffic.
-            None,
-            csi_hardware,
-        ),
     };
     configure_node_radio(&mut node, CSI_OPERATION_MODE);
     log_ln!(

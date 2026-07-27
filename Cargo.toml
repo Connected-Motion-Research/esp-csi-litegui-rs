@@ -11,7 +11,7 @@ keywords     = ["esp32", "wifi", "csi", "embedded", "no-std"]
 categories   = ["embedded", "no-std"]
 
 [features]
-default = ["no-std", "println", "auto", "mode-now"]
+default = ["no-std", "println", "auto", "mode-snf"]
 ## Build without the standard library.
 no-std = []
 ## Enable logging via `println!()`.
@@ -54,19 +54,17 @@ waveshare-esp32-s3-touch-amoled-1_8 = [
 ]
 
 ## CSI operation mode feature flags
-## Default mode is `mode-now`.
-## You can safely override it by adding one of `mode-sta`, `mode-snf`,
-## `mode-ap`, or `mode-fast` (without disabling default features).
+## Default mode is `mode-snf`.
+## You can safely override it by adding `mode-sta` or `mode-ap`
+## (without disabling default features).
 ## Only one override mode may be enabled at a time.
 mode-sta = []
-mode-now = []
 mode-snf = []
 ## SoftAP CSI collector: this board runs an AP + DHCP server and an ICMP flood;
 ## CSI is captured from the associated station's uplink frames.
 mode-ap = []
 ## Fast one-to-one ESP-NOW collector: RX-only capture of a peer
 ## `esp_now_fast_source`'s forced-MCS7 unicast flood.
-mode-fast = []
 
 [dependencies]
 esp-bootloader-esp-idf = "0.5.0"
@@ -97,7 +95,7 @@ static_cell = { version = "2.1.1" }
 embassy-sync = { version = "0.8.0" }
 esp-sync = { version = "0.2.1" }
 embassy-futures = { version = "0.1.2" }
-esp-csi-rs = { version = "0.8.3", default-features = false }
+esp-csi-rs = { version = "0.9", default-features = false }
 # Required by esp-csi-rs's `log_ln!` macro: its async-logging arm expands to a
 # bare `log::info!`, which resolves in the calling crate.
 log = "0.4.29"
@@ -132,3 +130,8 @@ panic = "abort"
 
 [profile.release.package."*"]
 opt-level = 3
+# The emitter/collector API is not on crates.io yet. Remove once
+# esp-csi-rs 0.10 / esp-csi-rs-core 0.2 are published.
+[patch.crates-io]
+esp-csi-rs = { git = "https://github.com/csi-rs/esp-csi-rs.git", branch = "feat/emitter-collector" }
+esp-csi-rs-core = { git = "https://github.com/csi-rs/esp-csi-rs-core.git", branch = "feat/emitter-collector" }
