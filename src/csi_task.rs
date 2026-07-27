@@ -36,6 +36,16 @@ pub fn configure_node_radio(node: &mut CSINode<'_>, mode: CsiOperationMode) {
             // LR broadens frame/rate compatibility on that channel.
             node.set_protocol(Protocol::LR);
         }
+        CsiOperationMode::WifiAccessPoint => {
+            // 11n uplink from the associated station maximizes HT-LTF CSI
+            // density from the ICMP echo replies.
+            node.set_protocol(Protocol::N);
+        }
+        CsiOperationMode::EspNowFastCollector => {
+            // Protocol::N only — EspNowConfig::fast_default() already forces
+            // the per-peer PHY to MCS7; set_rate here would clobber it.
+            node.set_protocol(Protocol::N);
+        }
     }
 }
 

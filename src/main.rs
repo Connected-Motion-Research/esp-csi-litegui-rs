@@ -43,13 +43,20 @@
 //! - `mode-sta`: Wi-Fi station mode CSI collection.
 //! - `mode-now`: ESP-NOW mode CSI collection.
 //! - `mode-snf`: Wi-Fi sniffer mode CSI collection.
+//! - `mode-ap`: SoftAP collector — this board runs an AP (SSID `esp-csi-ap`)
+//!   with a built-in DHCP server and pings the associated station; CSI is
+//!   captured from its uplink replies. Pair with any Wi-Fi station, e.g. the
+//!   esp-csi-rs `wifi_station` example.
+//! - `mode-fast`: Fast one-to-one ESP-NOW collector — RX-only capture of a
+//!   forced-MCS7 unicast flood. Pair with a peer flashed with the esp-csi-rs
+//!   `esp_now_fast_source` example on the same channel.
 //!
 //! Notes:
 //!
 //! - `mode-now` is enabled by default.
-//! - You can safely override default mode by enabling `mode-sta` or `mode-snf`
-//!   without disabling default features.
-//! - `mode-sta` and `mode-snf` cannot be enabled together.
+//! - You can safely override the default mode by enabling one of `mode-sta`,
+//!   `mode-snf`, `mode-ap`, or `mode-fast` without disabling default features.
+//! - Only one override mode can be enabled at a time.
 //!
 //! ## Quick start
 //!
@@ -84,6 +91,18 @@
 //! cargo run --release --features="waveshare-esp32-s3-touch-amoled-1_8,mode-snf"
 //! ```
 //!
+//! LilyGo + softAP collector mode:
+//!
+//! ```bash
+//! cargo run --release --features="lilygo-t4,mode-ap"
+//! ```
+//!
+//! Waveshare + fast ESP-NOW collector mode:
+//!
+//! ```bash
+//! cargo run --release --features="waveshare-esp32-s3-touch-amoled-1_8,mode-fast"
+//! ```
+//!
 //! ## Beginner tips
 //!
 //! - Start with station mode first; it is usually the easiest mode to validate.
@@ -97,8 +116,8 @@
 use core::ptr::addr_of_mut;
 use embassy_executor::Spawner;
 use esp_bootloader_esp_idf::esp_app_desc;
-use esp_csi_rs::logging::logging::{LogMode, init_logger};
-use esp_csi_rs::{CSINode, CSINodeClient, CSINodeHardware, CollectionMode, EspNowConfig, WifiSnifferConfig, WifiStationConfig, config::CsiConfig, log_ln, set_csi_logging_enabled};
+use esp_csi_rs::logging::logging::{LogMode, auto_log_backend_label, init_logger};
+use esp_csi_rs::{CSINode, CSINodeClient, CSINodeHardware, CollectionMode, EspNowConfig, WifiApConfig, WifiSnifferConfig, WifiStationConfig, config::CsiConfig, install_static_espnow_recv, log_ln, set_csi_logging_enabled};
 use esp_hal::dma_buffers;
 use esp_hal::timer::timg::TimerGroup;
 use esp_hal::{
@@ -122,10 +141,12 @@ use static_cell::StaticCell;
 use cst226_rs::{CST226_DEVICE_ADDRESS, Cst226Driver};
 #[cfg(feature = "waveshare-esp32-s3-touch-amoled-1_8")]
 use ft3x68_rs::{FT3168_DEVICE_ADDRESS, Ft3x68Driver};
+use esp_radio::wifi::PowerSaveMode;
+use esp_radio::wifi::ap::AccessPointConfig;
 use esp_radio::wifi::sta::StationConfig;
 
 use crate::alloc::string::ToString;
-use config::{BOARD_NAME, CSI_CHANNEL, CSI_OPERATION_MODE, CsiOperationMode, DISPLAY_SIZE, FB_SIZE};
+use config::{AP_PING_RATE_HZ, AP_SSID, BOARD_NAME, CSI_CHANNEL, CSI_OPERATION_MODE, CsiOperationMode, DISPLAY_SIZE, FB_SIZE};
 use csi_task::configure_node_radio;
 #[cfg(feature = "lilygo-t4")]
 use gesture_task::display_gesture_runner;
@@ -172,6 +193,7 @@ async fn main(spawner: Spawner) {
     // `csi_task` first awaits `get_csi_data()` (which flips mode to `Async`)
     // would otherwise be dumped to UART.
     set_csi_logging_enabled(false);
+    log_ln!("Log backend: {}", auto_log_backend_label());
     log_ln!("Board profile: {}", BOARD_NAME);
 
     esp_alloc::heap_allocator!(size: 61 * 1024);
@@ -330,13 +352,20 @@ async fn main(spawner: Spawner) {
     esp_rtos::start(timg0.timer0, sw_int.software_interrupt0);
 
     // Initialize WiFi Controller
-    // PowerSaveMode defaults to None in esp-radio 0.18, so no explicit override needed.
     let config_radio = esp_radio::wifi::ControllerConfig::default();
     let (wifi_controller, mut interfaces) =
         esp_radio::wifi::new(peripherals.WIFI, config_radio)
             .expect("Failed to initialize Wi-Fi controller");
 
+    // Replace esp-radio's heap-backed ESP-NOW receive queue with esp-csi-rs's
+    // static pool as early as possible. `node.run()` performs the same takeover,
+    // but display/second-core bring-up sits between here and `run()`, and a
+    // nearby ESP-NOW transmitter can grow the heap queue during that window.
+    // Harmless in non-ESP-NOW modes (the sniffer suspends recv at run start).
+    install_static_espnow_recv();
+
     let controller = WIFI_CONTROLLER.init(wifi_controller);
+    let _ = controller.set_power_saving(PowerSaveMode::None);
 
     log_ln!("WiFi Controller Initialized");
 
@@ -349,7 +378,7 @@ async fn main(spawner: Spawner) {
                 .with_password("PASS".to_string())
                 .with_auth_method(esp_radio::wifi::AuthenticationMethod::Wpa2Personal);
 
-                let station_config = WifiStationConfig { client_config };
+                let station_config = WifiStationConfig::new(client_config);
             CSINode::new(
                 esp_csi_rs::Node::Central(esp_csi_rs::CentralOpMode::WifiStation(station_config)),
                 CollectionMode::Collector,
@@ -379,6 +408,30 @@ async fn main(spawner: Spawner) {
                 csi_hardware,
             )
         }
+        CsiOperationMode::WifiAccessPoint => {
+            let ap_radio_config = AccessPointConfig::default()
+                .with_ssid(AP_SSID)
+                .with_channel(CSI_CHANNEL);
+            // Defaults: AP 192.168.13.1, single lease .2, DHCP server on.
+            let ap_config = WifiApConfig::new(ap_radio_config, CSI_CHANNEL, None);
+            CSINode::new(
+                esp_csi_rs::Node::Central(esp_csi_rs::CentralOpMode::WifiAccessPoint(ap_config)),
+                CollectionMode::Collector,
+                Some(CsiConfig::default()),
+                Some(AP_PING_RATE_HZ),
+                csi_hardware,
+            )
+        }
+        CsiOperationMode::EspNowFastCollector => CSINode::new(
+            esp_csi_rs::Node::Central(esp_csi_rs::CentralOpMode::EspNowFastCollector(
+                EspNowConfig::fast_default().with_channel(CSI_CHANNEL),
+            )),
+            CollectionMode::Collector,
+            Some(CsiConfig::default()),
+            // Collector is RX-only after discovery; the source generates the traffic.
+            None,
+            csi_hardware,
+        ),
     };
     configure_node_radio(&mut node, CSI_OPERATION_MODE);
     log_ln!(

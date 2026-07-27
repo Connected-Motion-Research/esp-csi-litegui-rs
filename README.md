@@ -47,18 +47,25 @@ Enable exactly one:
 - mode-now (default)
 - mode-sta
 - mode-snf
+- mode-ap — softAP collector: the board runs an AP (SSID `esp-csi-ap`) with a built-in DHCP server and pings the associated station; CSI is captured from its uplink replies.
+- mode-fast — fast one-to-one ESP-NOW collector: RX-only capture of a forced-MCS7 unicast flood from a peer running the esp-csi-rs `esp_now_fast_source` example.
 
 Rules:
 - mode-now is enabled by default.
-- mode-sta and mode-snf cannot both be enabled.
-- You can enable mode-sta or mode-snf without disabling defaults.
+- Only one of mode-sta / mode-snf / mode-ap / mode-fast can be enabled.
+- You can enable an override mode without disabling defaults.
+
+Pairing notes:
+- mode-ap: any Wi-Fi station joining `esp-csi-ap` works (e.g. the esp-csi-rs `wifi_station` example); clients get a 192.168.13.x lease from the built-in DHCP server, and CSI flows once a station associates.
+- mode-fast: requires a peer flashed with the esp-csi-rs `esp_now_fast_source` example on the same channel (this app uses channel 1; the upstream example defaults to 6 — change one side to match).
 
 ### Logging/Debug Features (optional)
 - println
-- async-print
-- defmt
-- jtag-serial
-- uart
+- async-print — force non-blocking async logging (no longer implied by jtag-serial as of esp-csi-rs 0.8; the default `auto` feature already picks the async drain at runtime when USB-Serial-JTAG is active)
+- defmt — esp-csi-rs 0.8 registers its own rzcobs-encoded defmt global logger
+- external-defmt-logger — use your own defmt global logger instead
+- jtag-serial — force the JTAG transport
+- uart — force the UART transport (do not combine with async-print)
 
 ## Build and Run
 
@@ -111,6 +118,26 @@ cargo run --release --features="waveshare-esp32-s3-touch-amoled-1_8,mode-sta"
 Waveshare + sniffer mode:
 ```bash
 cargo run --release --features="waveshare-esp32-s3-touch-amoled-1_8,mode-snf"
+```
+
+LilyGo + softAP collector mode:
+```bash
+cargo run --release --features="lilygo-t4,mode-ap"
+```
+
+LilyGo + fast ESP-NOW collector mode:
+```bash
+cargo run --release --features="lilygo-t4,mode-fast"
+```
+
+Waveshare + softAP collector mode:
+```bash
+cargo run --release --features="waveshare-esp32-s3-touch-amoled-1_8,mode-ap"
+```
+
+Waveshare + fast ESP-NOW collector mode:
+```bash
+cargo run --release --features="waveshare-esp32-s3-touch-amoled-1_8,mode-fast"
 ```
 
 ## Gesture Behavior

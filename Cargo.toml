@@ -2,7 +2,7 @@
 edition      = "2024"
 name         = "esp-csi-litegui-rs"
 rust-version = "1.88"
-version      = "0.1.4"
+version      = "0.2.0"
 description  = "No-std CSI heatmap GUI firmware for ESP32 boards with AMOLED displays"
 license      = "Apache-2.0"
 repository   = "https://github.com/csi-rs/esp-csi-litegui-rs"
@@ -16,20 +16,28 @@ default = ["no-std", "println", "auto", "mode-now"]
 no-std = []
 ## Enable logging via `println!()`.
 println = ["esp-csi-rs/println", "esp-backtrace/println"]
-## Automatically select the best available backend for the target.
+## Select the logging backend at runtime: async drain when USB SOF indicates
+## USB-Serial-JTAG is active, sync inline logging on the UART path.
+## `async-print` overrides this and forces async logging.
 auto = ["esp-csi-rs/auto"]
 
 ## Debugging Features
-## Non-blocking async logging. This is an unstable feature and may cause unexpected behavior. Use with caution.
+## Force non-blocking async logging regardless of runtime backend detection.
+## (No longer implied by `jtag-serial` as of esp-csi-rs 0.8.)
 async-print = ["esp-csi-rs/async-print"]
-## Enable logging via defmt.
+## Enable logging via defmt. esp-csi-rs 0.8 registers its own rzcobs-encoded
+## defmt global logger (it no longer enables `esp-println/defmt-espflash`).
 defmt = [
     "esp-csi-rs/defmt",
     "esp-backtrace/defmt",
 ]
-## Force the JTAG backend for logging.
+## Use an external defmt global logger instead of the one esp-csi-rs registers.
+external-defmt-logger = ["esp-csi-rs/external-defmt-logger"]
+## Force the JTAG transport for logging. With `auto`, the async drain is still
+## selected at runtime; add `async-print` to force it.
 jtag-serial = ["esp-csi-rs/jtag-serial"]
 ## Force the UART backend for logging (not recommended, much slower than JTAG backend).
+## Do not combine with `async-print`.
 uart = ["esp-csi-rs/uart"]
 
 ## Support for the Lilygo T4
@@ -47,11 +55,18 @@ waveshare-esp32-s3-touch-amoled-1_8 = [
 
 ## CSI operation mode feature flags
 ## Default mode is `mode-now`.
-## You can safely override it by adding either `mode-sta` or `mode-snf`
-## (without disabling default features).
+## You can safely override it by adding one of `mode-sta`, `mode-snf`,
+## `mode-ap`, or `mode-fast` (without disabling default features).
+## Only one override mode may be enabled at a time.
 mode-sta = []
 mode-now = []
 mode-snf = []
+## SoftAP CSI collector: this board runs an AP + DHCP server and an ICMP flood;
+## CSI is captured from the associated station's uplink frames.
+mode-ap = []
+## Fast one-to-one ESP-NOW collector: RX-only capture of a peer
+## `esp_now_fast_source`'s forced-MCS7 unicast flood.
+mode-fast = []
 
 [dependencies]
 esp-bootloader-esp-idf = "0.5.0"
@@ -82,7 +97,10 @@ static_cell = { version = "2.1.1" }
 embassy-sync = { version = "0.8.0" }
 esp-sync = { version = "0.2.1" }
 embassy-futures = { version = "0.1.2" }
-esp-csi-rs = { version = "0.7.0", default-features = false }
+esp-csi-rs = { version = "0.8.3", default-features = false }
+# Required by esp-csi-rs's `log_ln!` macro: its async-logging arm expands to a
+# bare `log::info!`, which resolves in the calling crate.
+log = "0.4.29"
 micromath = "2.1.0"
 rm690b0-rs = { version = "0.1.3" }
 embedded-graphics = "0.8.2"

@@ -838,7 +838,7 @@ dependencies = [
 
 [[package]]
 name = "esp-csi-litegui-rs"
-version = "0.1.4"
+version = "0.2.0"
 dependencies = [
  "cst226-rs",
  "embassy-executor",
@@ -857,6 +857,7 @@ dependencies = [
  "esp-rtos",
  "esp-sync",
  "ft3x68-rs",
+ "log",
  "micromath",
  "profont",
  "rm690b0-rs",
@@ -865,9 +866,9 @@ dependencies = [
 
 [[package]]
 name = "esp-csi-rs"
-version = "0.7.0"
+version = "0.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f980f2dee93bf4bda9fcd5018f337747c49e2251a730e4b4438789d64fd19740"
+checksum = "840c1b039db26cdce3c70af6073c5ebfa6d876be680528a60d7d9155621e46df"
 dependencies = [
  "defmt 1.0.1",
  "document-features",
@@ -999,7 +1000,6 @@ version = "0.17.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "42dee1e9ac7c3539bf6464db1707b0edd7557168f98278cf3c84fe70e63c6ce6"
 dependencies = [
- "defmt 1.0.1",
  "document-features",
  "esp-metadata-generated",
  "esp-sync",
